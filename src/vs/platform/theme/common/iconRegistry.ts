@@ -3,19 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { RunOnceScheduler } from 'vs/base/common/async';
-import { Codicon, CSSIcon } from 'vs/base/common/codicons';
-import { Emitter, Event } from 'vs/base/common/event';
-import { IJSONSchema, IJSONSchemaMap } from 'vs/base/common/jsonSchema';
-import { URI } from 'vs/base/common/uri';
-import { localize } from 'vs/nls';
-import { Extensions as JSONExtensions, IJSONContributionRegistry } from 'vs/platform/jsonschemas/common/jsonContributionRegistry';
-import * as platform from 'vs/platform/registry/common/platform';
-import { ThemeIcon } from 'vs/platform/theme/common/themeService';
+import { RunOnceScheduler } from '../../../base/common/async.js';
+import { Codicon } from '../../../base/common/codicons.js';
+import { getCodiconFontCharacters } from '../../../base/common/codiconsUtil.js';
+import { ThemeIcon, IconIdentifier } from '../../../base/common/themables.js';
+import { Emitter, Event } from '../../../base/common/event.js';
+import { IJSONSchema, IJSONSchemaMap } from '../../../base/common/jsonSchema.js';
+import { isString } from '../../../base/common/types.js';
+import { URI } from '../../../base/common/uri.js';
+import { localize } from '../../../nls.js';
+import { Extensions as JSONExtensions, IJSONContributionRegistry } from '../../jsonschemas/common/jsonContributionRegistry.js';
+import * as platform from '../../registry/common/platform.js';
 
 //  ------ API types
 
-export type IconIdentifier = string;
 
 // icon registry
 export const Extensions = {
@@ -25,15 +26,15 @@ export const Extensions = {
 export type IconDefaults = ThemeIcon | IconDefinition;
 
 export interface IconDefinition {
-	font?: IconFontContribution; // undefined for the default font (codicon)
-	fontCharacter: string;
+	readonly font?: IconFontContribution; // undefined for the default font (codicon)
+	readonly fontCharacter: string;
 }
 
 
 export interface IconContribution {
 	readonly id: string;
 	description: string | undefined;
-	deprecationMessage?: string;
+	readonly deprecationMessage?: string;
 	readonly defaults: IconDefaults;
 }
 
@@ -53,7 +54,7 @@ export namespace IconContribution {
 
 export interface IconFontContribution {
 	readonly id: string;
-	getDefinition(): IconFontDefinition | undefined;
+	readonly definition: IconFontDefinition;
 }
 
 export interface IconFontDefinition {
@@ -62,8 +63,30 @@ export interface IconFontDefinition {
 	readonly src: IconFontSource[];
 }
 
+export namespace IconFontDefinition {
+	export function toJSONObject(iconFont: IconFontDefinition): any {
+		return {
+			weight: iconFont.weight,
+			style: iconFont.style,
+			src: iconFont.src.map(s => ({ format: s.format, location: s.location.toString() }))
+		};
+	}
+	export function fromJSONObject(json: any): IconFontDefinition | undefined {
+		const stringOrUndef = (s: any) => isString(s) ? s : undefined;
+		if (json && Array.isArray(json.src) && json.src.every((s: any) => isString(s.format) && isString(s.location))) {
+			return {
+				weight: stringOrUndef(json.weight),
+				style: stringOrUndef(json.style),
+				src: json.src.map((s: any) => ({ format: s.format, location: URI.parse(s.location) }))
+			};
+		}
+		return undefined;
+	}
+}
+
+
 export interface IconFontSource {
-	readonly location: URI,
+	readonly location: URI;
 	readonly format: string;
 }
 
@@ -122,6 +145,17 @@ export interface IIconRegistry {
 	getIconFont(id: string): IconFontDefinition | undefined;
 }
 
+// regexes for validation of font properties
+
+export const fontIdRegex = /^([\w_-]+)$/;
+export const fontStyleRegex = /^(normal|italic|(oblique[ \w\s-]+))$/;
+export const fontWeightRegex = /^(normal|bold|lighter|bolder|(\d{0-1000}))$/;
+export const fontSizeRegex = /^([\w_.%+-]+)$/;
+export const fontFormatRegex = /^woff|woff2|truetype|opentype|embedded-opentype|svg$/;
+export const fontColorRegex = /^#[0-9a-fA-F]{0,6}$/;
+
+export const fontIdErrorMessage = localize('schema.fontId.formatError', 'The font ID must only contain letters, numbers, underscores and dashes.');
+
 class IconRegistry implements IIconRegistry {
 
 	private readonly _onDidChange = new Emitter<void>();
@@ -133,8 +167,8 @@ class IconRegistry implements IIconRegistry {
 			icons: {
 				type: 'object',
 				properties: {
-					fontId: { type: 'string', description: localize('iconDefintion.fontId', 'The id of the font to use. If not set, the font that is defined first is used.') },
-					fontCharacter: { type: 'string', description: localize('iconDefintion.fontCharacter', 'The font character associated with the icon definition.') }
+					fontId: { type: 'string', description: localize('iconDefinition.fontId', 'The id of the font to use. If not set, the font that is defined first is used.'), pattern: fontIdRegex.source, patternErrorMessage: fontIdErrorMessage },
+					fontCharacter: { type: 'string', description: localize('iconDefinition.fontCharacter', 'The font character associated with the icon definition.') }
 				},
 				additionalProperties: false,
 				defaultSnippets: [{ body: { fontCharacter: '\\\\e030' } }]
@@ -143,7 +177,7 @@ class IconRegistry implements IIconRegistry {
 		type: 'object',
 		properties: {}
 	};
-	private iconReferenceSchema: IJSONSchema & { enum: string[], enumDescriptions: string[] } = { type: 'string', pattern: `^${CSSIcon.iconNameExpression}$`, enum: [], enumDescriptions: [] };
+	private iconReferenceSchema: IJSONSchema & { enum: string[]; enumDescriptions: string[] } = { type: 'string', pattern: `^${ThemeIcon.iconNameExpression}$`, enum: [], enumDescriptions: [] };
 
 	private iconFontsById: { [key: string]: IconFontDefinition };
 
@@ -166,9 +200,9 @@ class IconRegistry implements IIconRegistry {
 			}
 			return existing;
 		}
-		let iconContribution: IconContribution = { id, description, defaults, deprecationMessage };
+		const iconContribution: IconContribution = { id, description, defaults, deprecationMessage };
 		this.iconsById[id] = iconContribution;
-		let propertySchema: IJSONSchema = { $ref: '#/definitions/icons' };
+		const propertySchema: IJSONSchema = { $ref: '#/definitions/icons' };
 		if (deprecationMessage) {
 			propertySchema.deprecationMessage = deprecationMessage;
 		}
@@ -240,7 +274,7 @@ class IconRegistry implements IIconRegistry {
 			return `codicon codicon-${i ? i.id : ''}`;
 		};
 
-		let reference = [];
+		const reference = [];
 
 		reference.push(`| preview     | identifier                        | default codicon ID                | description`);
 		reference.push(`| ----------- | --------------------------------- | --------------------------------- | --------------------------------- |`);
@@ -275,15 +309,17 @@ export function getIconRegistry(): IIconRegistry {
 }
 
 function initialize() {
-	for (const icon of Codicon.getAll()) {
-		iconRegistry.registerIcon(icon.id, icon.definition, icon.description);
+	const codiconFontCharacters = getCodiconFontCharacters();
+	for (const icon in codiconFontCharacters) {
+		const fontCharacter = '\\' + codiconFontCharacters[icon].toString(16);
+		iconRegistry.registerIcon(icon, { fontCharacter });
 	}
 }
 initialize();
 
 export const iconsSchemaId = 'vscode://schemas/icons';
 
-let schemaRegistry = platform.Registry.as<IJSONContributionRegistry>(JSONExtensions.JSONContribution);
+const schemaRegistry = platform.Registry.as<IJSONContributionRegistry>(JSONExtensions.JSONContribution);
 schemaRegistry.registerSchema(iconsSchemaId, iconRegistry.getIconSchema());
 
 const delayer = new RunOnceScheduler(() => schemaRegistry.notifySchemaChanged(iconsSchemaId), 200);
@@ -292,7 +328,6 @@ iconRegistry.onDidChange(() => {
 		delayer.schedule();
 	}
 });
-
 
 //setTimeout(_ => console.log(iconRegistry.toString()), 5000);
 

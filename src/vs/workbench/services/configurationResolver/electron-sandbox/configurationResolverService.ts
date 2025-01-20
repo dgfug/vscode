@@ -3,18 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { INativeWorkbenchEnvironmentService } from 'vs/workbench/services/environment/electron-sandbox/environmentService';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ICommandService } from 'vs/platform/commands/common/commands';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
-import { IConfigurationResolverService } from 'vs/workbench/services/configurationResolver/common/configurationResolver';
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { BaseConfigurationResolverService } from 'vs/workbench/services/configurationResolver/browser/configurationResolverService';
-import { ILabelService } from 'vs/platform/label/common/label';
-import { IShellEnvironmentService } from 'vs/workbench/services/environment/electron-sandbox/shellEnvironmentService';
-import { IPathService } from 'vs/workbench/services/path/common/pathService';
+import { INativeWorkbenchEnvironmentService } from '../../environment/electron-sandbox/environmentService.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IEditorService } from '../../editor/common/editorService.js';
+import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
+import { IConfigurationResolverService } from '../common/configurationResolver.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { BaseConfigurationResolverService } from '../browser/baseConfigurationResolverService.js';
+import { ILabelService } from '../../../../platform/label/common/label.js';
+import { IShellEnvironmentService } from '../../environment/electron-sandbox/shellEnvironmentService.js';
+import { IPathService } from '../../path/common/pathService.js';
+import { IExtensionService } from '../../extensions/common/extensions.js';
+import { IStorageService } from '../../../../platform/storage/common/storage.js';
 
 export class ConfigurationResolverService extends BaseConfigurationResolverService {
 
@@ -27,7 +29,9 @@ export class ConfigurationResolverService extends BaseConfigurationResolverServi
 		@IQuickInputService quickInputService: IQuickInputService,
 		@ILabelService labelService: ILabelService,
 		@IShellEnvironmentService shellEnvironmentService: IShellEnvironmentService,
-		@IPathService pathService: IPathService
+		@IPathService pathService: IPathService,
+		@IExtensionService extensionService: IExtensionService,
+		@IStorageService storageService: IStorageService,
 	) {
 		super({
 			getAppRoot: (): string | undefined => {
@@ -35,10 +39,10 @@ export class ConfigurationResolverService extends BaseConfigurationResolverServi
 			},
 			getExecPath: (): string | undefined => {
 				return environmentService.execPath;
-			}
+			},
 		}, shellEnvironmentService.getShellEnv(), editorService, configurationService, commandService,
-			workspaceContextService, quickInputService, labelService, pathService);
+			workspaceContextService, quickInputService, labelService, pathService, extensionService, storageService);
 	}
 }
 
-registerSingleton(IConfigurationResolverService, ConfigurationResolverService, true);
+registerSingleton(IConfigurationResolverService, ConfigurationResolverService, InstantiationType.Delayed);

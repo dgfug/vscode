@@ -3,14 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { URI } from 'vs/base/common/uri';
-import { mock } from 'vs/base/test/common/mock';
-import { IDialogService } from 'vs/platform/dialogs/common/dialogs';
-import { TestDialogService } from 'vs/platform/dialogs/test/common/testDialogService';
-import { TestNotificationService } from 'vs/platform/notification/test/common/testNotificationService';
-import { IUndoRedoElement, UndoRedoElementType, UndoRedoGroup } from 'vs/platform/undoRedo/common/undoRedo';
-import { UndoRedoService } from 'vs/platform/undoRedo/common/undoRedoService';
+import assert from 'assert';
+import { URI } from '../../../../base/common/uri.js';
+import { mock } from '../../../../base/test/common/mock.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { IDialogService, IPrompt } from '../../../dialogs/common/dialogs.js';
+import { TestDialogService } from '../../../dialogs/test/common/testDialogService.js';
+import { TestNotificationService } from '../../../notification/test/common/testNotificationService.js';
+import { IUndoRedoElement, UndoRedoElementType, UndoRedoGroup } from '../../common/undoRedo.js';
+import { UndoRedoService } from '../../common/undoRedoService.js';
 
 suite('UndoRedoService', () => {
 
@@ -34,6 +35,7 @@ suite('UndoRedoService', () => {
 			type: UndoRedoElementType.Resource,
 			resource: resource,
 			label: 'typing 1',
+			code: 'typing',
 			undo: () => { undoCall1++; },
 			redo: () => { redoCall1++; }
 		};
@@ -68,6 +70,7 @@ suite('UndoRedoService', () => {
 			type: UndoRedoElementType.Resource,
 			resource: resource,
 			label: 'typing 2',
+			code: 'typing',
 			undo: () => { undoCall2++; },
 			redo: () => { redoCall2++; }
 		};
@@ -99,6 +102,7 @@ suite('UndoRedoService', () => {
 			type: UndoRedoElementType.Resource,
 			resource: resource,
 			label: 'typing 2',
+			code: 'typing',
 			undo: () => { undoCall3++; },
 			redo: () => { redoCall3++; }
 		};
@@ -133,9 +137,14 @@ suite('UndoRedoService', () => {
 		const resource1 = URI.file('test1.txt');
 		const resource2 = URI.file('test2.txt');
 		const service = createUndoRedoService(new class extends mock<IDialogService>() {
-			override async show() {
+			override async prompt<T = any>(prompt: IPrompt<any>) {
+				const result = prompt.buttons?.[0].run({ checkboxChecked: false });
+
+				return { result };
+			}
+			override async confirm() {
 				return {
-					choice: 0 // confirm!
+					confirmed: true // confirm!
 				};
 			}
 		});
@@ -146,6 +155,7 @@ suite('UndoRedoService', () => {
 			type: UndoRedoElementType.Workspace,
 			resources: [resource1, resource2],
 			label: 'typing 1',
+			code: 'typing',
 			undo: () => { undoCall1++; },
 			redo: () => { redoCall1++; },
 			split: () => {
@@ -154,6 +164,7 @@ suite('UndoRedoService', () => {
 						type: UndoRedoElementType.Resource,
 						resource: resource1,
 						label: 'typing 1.1',
+						code: 'typing',
 						undo: () => { undoCall11++; },
 						redo: () => { redoCall11++; }
 					},
@@ -161,6 +172,7 @@ suite('UndoRedoService', () => {
 						type: UndoRedoElementType.Resource,
 						resource: resource2,
 						label: 'typing 1.2',
+						code: 'typing',
 						undo: () => { undoCall12++; },
 						redo: () => { redoCall12++; }
 					}
@@ -215,4 +227,5 @@ suite('UndoRedoService', () => {
 		assert.strictEqual(UndoRedoGroup.None.nextOrder(), 0);
 	});
 
+	ensureNoDisposablesAreLeakedInTestSuite();
 });

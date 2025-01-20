@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as strings from 'vs/base/common/strings';
-import { IPatternInfo } from 'vs/workbench/services/search/common/search';
-import { CharCode } from 'vs/base/common/charCode';
-import { buildReplaceStringWithCasePreserved } from 'vs/base/common/search';
+import * as strings from '../../../../base/common/strings.js';
+import { IPatternInfo } from './search.js';
+import { CharCode } from '../../../../base/common/charCode.js';
+import { buildReplaceStringWithCasePreserved } from '../../../../base/common/search.js';
 
 export class ReplacePattern {
 
@@ -15,8 +15,8 @@ export class ReplacePattern {
 	private _regExp: RegExp;
 	private _caseOpsRegExp: RegExp;
 
-	constructor(replaceString: string, searchPatternInfo: IPatternInfo)
-	constructor(replaceString: string, parseParameters: boolean, regEx: RegExp)
+	constructor(replaceString: string, searchPatternInfo: IPatternInfo);
+	constructor(replaceString: string, parseParameters: boolean, regEx: RegExp);
 	constructor(replaceString: string, arg2: any, arg3?: any) {
 		this._replacePattern = replaceString;
 		let searchPatternInfo: IPatternInfo;
@@ -39,7 +39,7 @@ export class ReplacePattern {
 			this._regExp = strings.createRegExp(this._regExp.source, true, { matchCase: !this._regExp.ignoreCase, wholeWord: false, multiline: this._regExp.multiline, global: false });
 		}
 
-		this._caseOpsRegExp = new RegExp(/(.*?)((?:\\[uUlL])+?|)(\$[0-9]+)(.*?)/g);
+		this._caseOpsRegExp = new RegExp(/([\s\S]*?)((?:\\[uUlL])+?|)(\$[0-9]+)([\s\S]*?)/g);
 	}
 
 	get hasParameters(): boolean {

@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import * as assert from 'assert';
+import assert from 'assert';
 import * as words from '../utils/strings';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -10,7 +10,7 @@ import * as path from 'path';
 suite('HTML Language Configuration', () => {
 	const config = JSON.parse((fs.readFileSync(path.join(__dirname, '../../../../html/language-configuration.json')).toString()));
 
-	function createRegex(str: string | { pattern: string, flags: string }): RegExp {
+	function createRegex(str: string | { pattern: string; flags: string }): RegExp {
 		if (typeof str === 'string') {
 			return new RegExp(str, 'g');
 		}
@@ -24,8 +24,8 @@ suite('HTML Language Configuration', () => {
 		value = value.substr(0, offset) + value.substring(offset + 1);
 
 		const actualRange = words.getWordAtText(value, offset, wordRegex);
-		assert(actualRange.start <= offset);
-		assert(actualRange.start + actualRange.length >= offset);
+		assert.ok(actualRange.start <= offset);
+		assert.ok(actualRange.start + actualRange.length >= offset);
 		assert.strictEqual(value.substr(actualRange.start, actualRange.length), expected);
 	}
 

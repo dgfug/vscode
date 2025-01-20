@@ -3,46 +3,54 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Disposable, DisposableStore, dispose, IDisposable } from 'vs/base/common/lifecycle';
-import { Action2, registerAction2 } from 'vs/platform/actions/common/actions';
-import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-import { CATEGORIES } from 'vs/workbench/common/actions';
-import { getNotebookEditorFromEditorPane, ICellViewModel, INotebookEditor, INotebookEditorContribution } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
-import { registerNotebookContribution } from 'vs/workbench/contrib/notebook/browser/notebookEditorExtensions';
-import { NotebookEditorWidget } from 'vs/workbench/contrib/notebook/browser/notebookEditorWidget';
-import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { Disposable, DisposableStore, dispose, IDisposable } from '../../../../../../base/common/lifecycle.js';
+import { localize2 } from '../../../../../../nls.js';
+import { Categories } from '../../../../../../platform/action/common/actionCommonCategories.js';
+import { Action2, registerAction2 } from '../../../../../../platform/actions/common/actions.js';
+import { ServicesAccessor } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { getNotebookEditorFromEditorPane, ICellViewModel, ICommonCellViewModelLayoutChangeInfo, INotebookDeltaCellStatusBarItems, INotebookEditor, INotebookEditorContribution } from '../../notebookBrowser.js';
+import { registerNotebookContribution } from '../../notebookEditorExtensions.js';
+import { NotebookEditorWidget } from '../../notebookEditorWidget.js';
+import { CellStatusbarAlignment, INotebookCellStatusBarItem } from '../../../common/notebookCommon.js';
+import { INotebookService } from '../../../common/notebookService.js';
+import { IEditorService } from '../../../../../services/editor/common/editorService.js';
 
 export class TroubleshootController extends Disposable implements INotebookEditorContribution {
 	static id: string = 'workbench.notebook.troubleshoot';
 
 	private readonly _localStore = this._register(new DisposableStore());
 	private _cellStateListeners: IDisposable[] = [];
-	private _logging: boolean = false;
+	private _enabled: boolean = false;
+	private _cellStatusItems: string[] = [];
 
 	constructor(private readonly _notebookEditor: INotebookEditor) {
 		super();
 
 		this._register(this._notebookEditor.onDidChangeModel(() => {
-			this._localStore.clear();
-			this._cellStateListeners.forEach(listener => listener.dispose());
-
-			if (!this._notebookEditor.hasModel()) {
-				return;
-			}
-
-			this._updateListener();
+			this._update();
 		}));
+
+		this._update();
+	}
+
+	toggle(): void {
+		this._enabled = !this._enabled;
+		this._update();
+	}
+
+	private _update() {
+		this._localStore.clear();
+		this._cellStateListeners.forEach(listener => listener.dispose());
+
+		if (!this._notebookEditor.hasModel()) {
+			return;
+		}
 
 		this._updateListener();
 	}
 
-	toggleLogging(): void {
-		this._logging = !this._logging;
-	}
-
 	private _log(cell: ICellViewModel, e: any) {
-		if (this._logging) {
+		if (this._enabled) {
 			const oldHeight = (this._notebookEditor as NotebookEditorWidget).getViewHeight(cell);
 			console.log(`cell#${cell.handle}`, e, `${oldHeight} -> ${cell.layoutInfo.totalHeight}`);
 		}
@@ -62,10 +70,10 @@ export class TroubleshootController extends Disposable implements INotebookEdito
 		}
 
 		this._localStore.add(this._notebookEditor.onDidChangeViewCells(e => {
-			e.splices.reverse().forEach(splice => {
+			[...e.splices].reverse().forEach(splice => {
 				const [start, deleted, newCells] = splice;
 				const deletedCells = this._cellStateListeners.splice(start, deleted, ...newCells.map(cell => {
-					return cell.onDidChangeLayout(e => {
+					return cell.onDidChangeLayout((e: ICommonCellViewModelLayoutChangeInfo) => {
 						this._log(cell, e);
 					});
 				}));
@@ -73,6 +81,33 @@ export class TroubleshootController extends Disposable implements INotebookEdito
 				dispose(deletedCells);
 			});
 		}));
+
+		const vm = this._notebookEditor.getViewModel();
+		let items: INotebookDeltaCellStatusBarItems[] = [];
+
+		if (this._enabled) {
+			items = this._getItemsForCells();
+		}
+
+		this._cellStatusItems = vm.deltaCellStatusBarItems(this._cellStatusItems, items);
+	}
+
+	private _getItemsForCells(): INotebookDeltaCellStatusBarItems[] {
+		const items: INotebookDeltaCellStatusBarItems[] = [];
+		for (let i = 0; i < this._notebookEditor.getLength(); i++) {
+			items.push({
+				handle: i,
+				items: [
+					{
+						text: `index: ${i}`,
+						alignment: CellStatusbarAlignment.Left,
+						priority: Number.MAX_SAFE_INTEGER
+					} satisfies INotebookCellStatusBarItem
+				]
+			});
+		}
+
+		return items;
 	}
 
 	override dispose() {
@@ -87,8 +122,8 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'notebook.toggleLayoutTroubleshoot',
-			title: 'Toggle Notebook Layout Troubleshoot',
-			category: CATEGORIES.Developer,
+			title: localize2('workbench.notebook.toggleLayoutTroubleshoot', "Toggle Layout Troubleshoot"),
+			category: Categories.Developer,
 			f1: true
 		});
 	}
@@ -102,7 +137,7 @@ registerAction2(class extends Action2 {
 		}
 
 		const controller = editor.getContribution<TroubleshootController>(TroubleshootController.id);
-		controller?.toggleLogging();
+		controller?.toggle();
 	}
 });
 
@@ -110,8 +145,8 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'notebook.inspectLayout',
-			title: 'Inspect Notebook Layout',
-			category: CATEGORIES.Developer,
+			title: localize2('workbench.notebook.inspectLayout', "Inspect Notebook Layout"),
+			category: Categories.Developer,
 			f1: true
 		});
 	}
@@ -135,8 +170,8 @@ registerAction2(class extends Action2 {
 	constructor() {
 		super({
 			id: 'notebook.clearNotebookEdtitorTypeCache',
-			title: 'Clear Notebook Editor Cache',
-			category: CATEGORIES.Developer,
+			title: localize2('workbench.notebook.clearNotebookEdtitorTypeCache', "Clear Notebook Editor Type Cache"),
+			category: Categories.Developer,
 			f1: true
 		});
 	}

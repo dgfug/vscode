@@ -3,14 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as nls from 'vs/nls';
-import { Emitter, Event } from 'vs/base/common/event';
-import { LanguageConfigurationRegistry } from 'vs/editor/common/languages/languageConfigurationRegistry';
-import { ILanguageExtensionPoint } from 'vs/editor/common/services/language';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { Mimes } from 'vs/base/common/mime';
-import { IConfigurationRegistry, Extensions as ConfigurationExtensions } from 'vs/platform/configuration/common/configurationRegistry';
+import * as nls from '../../../nls.js';
+import { Emitter, Event } from '../../../base/common/event.js';
+import { ILanguageExtensionPoint } from './language.js';
+import { Registry } from '../../../platform/registry/common/platform.js';
+import { IDisposable } from '../../../base/common/lifecycle.js';
+import { Mimes } from '../../../base/common/mime.js';
+import { IConfigurationRegistry, Extensions as ConfigurationExtensions } from '../../../platform/configuration/common/configurationRegistry.js';
 
 // Define extension point ids
 export const Extensions = {
@@ -60,27 +59,6 @@ ModesRegistry.registerLanguage({
 	aliases: [nls.localize('plainText.alias', "Plain Text"), 'text'],
 	mimetypes: [Mimes.text]
 });
-
-LanguageConfigurationRegistry.register(PLAINTEXT_LANGUAGE_ID, {
-	brackets: [
-		['(', ')'],
-		['[', ']'],
-		['{', '}'],
-	],
-	surroundingPairs: [
-		{ open: '{', close: '}' },
-		{ open: '[', close: ']' },
-		{ open: '(', close: ')' },
-		{ open: '<', close: '>' },
-		{ open: '\"', close: '\"' },
-		{ open: '\'', close: '\'' },
-		{ open: '`', close: '`' },
-	],
-	colorizedBracketPairs: [],
-	folding: {
-		offSide: true
-	}
-}, 0);
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration)
 	.registerDefaultConfigurations([{

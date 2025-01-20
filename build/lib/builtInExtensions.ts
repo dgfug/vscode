@@ -15,11 +15,10 @@ import * as fancyLog from 'fancy-log';
 import * as ansiColors from 'ansi-colors';
 import { Stream } from 'stream';
 
-const mkdirp = require('mkdirp');
-
 export interface IExtensionDefinition {
 	name: string;
 	version: string;
+	sha256: string;
 	repo: string;
 	platforms?: string[];
 	metadata: {
@@ -31,7 +30,7 @@ export interface IExtensionDefinition {
 			flags: string;
 		};
 		publisherDisplayName: string;
-	}
+	};
 }
 
 const root = path.dirname(path.dirname(__dirname));
@@ -68,18 +67,36 @@ function isUpToDate(extension: IExtensionDefinition): boolean {
 	}
 }
 
-function syncMarketplaceExtension(extension: IExtensionDefinition): Stream {
+function getExtensionDownloadStream(extension: IExtensionDefinition) {
+	const galleryServiceUrl = productjson.extensionsGallery?.serviceUrl;
+	return (galleryServiceUrl ? ext.fromMarketplace(galleryServiceUrl, extension) : ext.fromGithub(extension))
+		.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`));
+}
+
+export function getExtensionStream(extension: IExtensionDefinition) {
+	// if the extension exists on disk, use those files instead of downloading anew
 	if (isUpToDate(extension)) {
-		log(ansiColors.blue('[marketplace]'), `${extension.name}@${extension.version}`, ansiColors.green('✔︎'));
+		log('[extensions]', `${extension.name}@${extension.version} up to date`, ansiColors.green('✔︎'));
+		return vfs.src(['**'], { cwd: getExtensionPath(extension), dot: true })
+			.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`));
+	}
+
+	return getExtensionDownloadStream(extension);
+}
+
+function syncMarketplaceExtension(extension: IExtensionDefinition): Stream {
+	const galleryServiceUrl = productjson.extensionsGallery?.serviceUrl;
+	const source = ansiColors.blue(galleryServiceUrl ? '[marketplace]' : '[github]');
+	if (isUpToDate(extension)) {
+		log(source, `${extension.name}@${extension.version}`, ansiColors.green('✔︎'));
 		return es.readArray([]);
 	}
 
 	rimraf.sync(getExtensionPath(extension));
 
-	return ext.fromMarketplace(extension.name, extension.version, extension.metadata)
-		.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`))
+	return getExtensionDownloadStream(extension)
 		.pipe(vfs.dest('.build/builtInExtensions'))
-		.on('end', () => log(ansiColors.blue('[marketplace]'), extension.name, ansiColors.green('✔︎')));
+		.on('end', () => log(source, extension.name, ansiColors.green('✔︎')));
 }
 
 function syncExtension(extension: IExtensionDefinition, controlState: 'disabled' | 'marketplace'): Stream {
@@ -128,19 +145,19 @@ function readControlFile(): IControlFile {
 }
 
 function writeControlFile(control: IControlFile): void {
-	mkdirp.sync(path.dirname(controlFilePath));
+	fs.mkdirSync(path.dirname(controlFilePath), { recursive: true });
 	fs.writeFileSync(controlFilePath, JSON.stringify(control, null, 2));
 }
 
 export function getBuiltInExtensions(): Promise<void> {
-	log('Syncronizing built-in extensions...');
+	log('Synchronizing built-in extensions...');
 	log(`You can manage built-in extensions with the ${ansiColors.cyan('--builtin')} flag`);
 
 	const control = readControlFile();
 	const streams: Stream[] = [];
 
 	for (const extension of [...builtInExtensions, ...webBuiltInExtensions]) {
-		let controlState = control[extension.name] || 'marketplace';
+		const controlState = control[extension.name] || 'marketplace';
 		control[extension.name] = controlState;
 
 		streams.push(syncExtension(extension, controlState));

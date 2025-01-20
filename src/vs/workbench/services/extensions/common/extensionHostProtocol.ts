@@ -3,7 +3,96 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBuffer } from 'vs/base/common/buffer';
+import { VSBuffer } from '../../../../base/common/buffer.js';
+import { URI, UriComponents, UriDto } from '../../../../base/common/uri.js';
+import { ExtensionIdentifier, IExtensionDescription } from '../../../../platform/extensions/common/extensions.js';
+import { ILoggerResource, LogLevel } from '../../../../platform/log/common/log.js';
+import { IRemoteConnectionData } from '../../../../platform/remote/common/remoteAuthorityResolver.js';
+
+export interface IExtensionDescriptionSnapshot {
+	readonly versionId: number;
+	readonly allExtensions: IExtensionDescription[];
+	readonly activationEvents: { [extensionId: string]: string[] };
+	readonly myExtensions: ExtensionIdentifier[];
+}
+
+export interface IExtensionDescriptionDelta {
+	readonly versionId: number;
+	readonly toRemove: ExtensionIdentifier[];
+	readonly toAdd: IExtensionDescription[];
+	readonly addActivationEvents: { [extensionId: string]: string[] };
+	readonly myToRemove: ExtensionIdentifier[];
+	readonly myToAdd: ExtensionIdentifier[];
+}
+
+export interface IExtensionHostInitData {
+	version: string;
+	quality: string | undefined;
+	commit?: string;
+	/**
+	 * When set to `0`, no polling for the parent process still running will happen.
+	 */
+	parentPid: number | 0;
+	environment: IEnvironment;
+	workspace?: IStaticWorkspaceData | null;
+	extensions: IExtensionDescriptionSnapshot;
+	nlsBaseUrl?: URI;
+	telemetryInfo: {
+		readonly sessionId: string;
+		readonly machineId: string;
+		readonly sqmId: string;
+		readonly devDeviceId: string;
+		readonly firstSessionDate: string;
+		readonly msftInternal?: boolean;
+	};
+	logLevel: LogLevel;
+	loggers: UriDto<ILoggerResource>[];
+	logsLocation: URI;
+	autoStart: boolean;
+	remote: { isRemote: boolean; authority: string | undefined; connectionData: IRemoteConnectionData | null };
+	consoleForward: { includeStack: boolean; logNative: boolean };
+	uiKind: UIKind;
+	messagePorts?: ReadonlyMap<string, MessagePortLike>;
+	handle?: string;
+}
+
+export interface IEnvironment {
+	isExtensionDevelopmentDebug: boolean;
+	appName: string;
+	appHost: string;
+	appRoot?: URI;
+	appLanguage: string;
+	extensionTelemetryLogResource: URI;
+	isExtensionTelemetryLoggingOnly: boolean;
+	appUriScheme: string;
+	extensionDevelopmentLocationURI?: URI[];
+	extensionTestsLocationURI?: URI;
+	globalStorageHome: URI;
+	workspaceStorageHome: URI;
+	useHostProxy?: boolean;
+	skipWorkspaceStorageLock?: boolean;
+	extensionLogLevel?: [string, string][];
+}
+
+export interface IStaticWorkspaceData {
+	id: string;
+	name: string;
+	transient?: boolean;
+	configuration?: UriComponents | null;
+	isUntitled?: boolean | null;
+}
+
+export interface MessagePortLike {
+	postMessage(message: any, transfer?: any[]): void;
+	addEventListener(type: 'message', listener: (e: any) => unknown): void;
+	removeEventListener(type: 'message', listener: (e: any) => unknown): void;
+	start(): void;
+}
+
+export enum UIKind {
+	Desktop = 1,
+	Web = 2
+}
 
 export const enum ExtensionHostExitCode {
 	// nodejs uses codes 1-13 and exit codes >128 are signal exits
@@ -56,4 +145,9 @@ export function isMessageOfType(message: VSBuffer, type: MessageType): boolean {
 		case 3: return type === MessageType.Terminate;
 		default: return false;
 	}
+}
+
+export const enum NativeLogMarkers {
+	Start = 'START_NATIVE_LOG',
+	End = 'END_NATIVE_LOG',
 }

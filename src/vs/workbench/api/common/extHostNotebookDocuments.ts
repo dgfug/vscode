@@ -3,30 +3,30 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Emitter } from 'vs/base/common/event';
-import { URI, UriComponents } from 'vs/base/common/uri';
-import { ILogService } from 'vs/platform/log/common/log';
-import * as extHostProtocol from 'vs/workbench/api/common/extHost.protocol';
-import { ExtHostNotebookController } from 'vs/workbench/api/common/extHostNotebook';
-import { SerializableObjectWithBuffers } from 'vs/workbench/services/extensions/common/proxyIdentifier';
+import { Emitter } from '../../../base/common/event.js';
+import { URI, UriComponents } from '../../../base/common/uri.js';
+import * as extHostProtocol from './extHost.protocol.js';
+import { ExtHostNotebookController } from './extHostNotebook.js';
+import { NotebookDocumentMetadata } from '../../contrib/notebook/common/notebookCommon.js';
+import { SerializableObjectWithBuffers } from '../../services/extensions/common/proxyIdentifier.js';
 import type * as vscode from 'vscode';
 
 export class ExtHostNotebookDocuments implements extHostProtocol.ExtHostNotebookDocumentsShape {
 
-	private readonly _onDidChangeNotebookDocumentMetadata = new Emitter<vscode.NotebookDocumentMetadataChangeEvent>();
-	readonly onDidChangeNotebookDocumentMetadata = this._onDidChangeNotebookDocumentMetadata.event;
-
-	private _onDidSaveNotebookDocument = new Emitter<vscode.NotebookDocument>();
+	private readonly _onDidSaveNotebookDocument = new Emitter<vscode.NotebookDocument>();
 	readonly onDidSaveNotebookDocument = this._onDidSaveNotebookDocument.event;
 
+	private readonly _onDidChangeNotebookDocument = new Emitter<vscode.NotebookDocumentChangeEvent>();
+	readonly onDidChangeNotebookDocument = this._onDidChangeNotebookDocument.event;
+
 	constructor(
-		@ILogService private readonly _logService: ILogService,
 		private readonly _notebooksAndEditors: ExtHostNotebookController,
 	) { }
 
-	$acceptModelChanged(uri: UriComponents, event: SerializableObjectWithBuffers<extHostProtocol.NotebookCellsChangedEventDto>, isDirty: boolean): void {
+	$acceptModelChanged(uri: UriComponents, event: SerializableObjectWithBuffers<extHostProtocol.NotebookCellsChangedEventDto>, isDirty: boolean, newMetadata?: NotebookDocumentMetadata): void {
 		const document = this._notebooksAndEditors.getNotebookDocument(URI.revive(uri));
-		document.acceptModelChanged(event.value, isDirty);
+		const e = document.acceptModelChanged(event.value, isDirty, newMetadata);
+		this._onDidChangeNotebookDocument.fire(e);
 	}
 
 	$acceptDirtyStateChanged(uri: UriComponents, isDirty: boolean): void {
@@ -37,14 +37,5 @@ export class ExtHostNotebookDocuments implements extHostProtocol.ExtHostNotebook
 	$acceptModelSaved(uri: UriComponents): void {
 		const document = this._notebooksAndEditors.getNotebookDocument(URI.revive(uri));
 		this._onDidSaveNotebookDocument.fire(document.apiNotebook);
-	}
-
-	$acceptDocumentPropertiesChanged(uri: UriComponents, data: extHostProtocol.INotebookDocumentPropertiesChangeData): void {
-		this._logService.debug('ExtHostNotebook#$acceptDocumentPropertiesChanged', uri.path, data);
-		const document = this._notebooksAndEditors.getNotebookDocument(URI.revive(uri));
-		document.acceptDocumentPropertiesChanged(data);
-		if (data.metadata) {
-			this._onDidChangeNotebookDocumentMetadata.fire({ document: document.apiNotebook });
-		}
 	}
 }

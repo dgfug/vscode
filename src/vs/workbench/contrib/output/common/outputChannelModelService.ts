@@ -3,58 +3,55 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { createDecorator, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IFileService } from 'vs/platform/files/common/files';
-import { toLocalISOString } from 'vs/base/common/date';
-import { dirname, joinPath } from 'vs/base/common/resources';
-import { DelegatedOutputChannelModel, FileOutputChannelModel, IOutputChannelModel } from 'vs/workbench/contrib/output/common/outputChannelModel';
-import { URI } from 'vs/base/common/uri';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
+import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { toLocalISOString } from '../../../../base/common/date.js';
+import { joinPath } from '../../../../base/common/resources.js';
+import { DelegatedOutputChannelModel, FileOutputChannelModel, IOutputChannelModel, MultiFileOutputChannelModel } from './outputChannelModel.js';
+import { URI } from '../../../../base/common/uri.js';
+import { ILanguageSelection } from '../../../../editor/common/languages/language.js';
+import { IOutputContentSource } from '../../../services/output/common/output.js';
 
 export const IOutputChannelModelService = createDecorator<IOutputChannelModelService>('outputChannelModelService');
 
 export interface IOutputChannelModelService {
 	readonly _serviceBrand: undefined;
 
-	createOutputChannelModel(id: string, modelUri: URI, mimeType: 'text/x-code-log-output' | 'text/x-code-output', file?: URI): IOutputChannelModel;
+	createOutputChannelModel(id: string, modelUri: URI, language: ILanguageSelection, source?: IOutputContentSource | ReadonlyArray<IOutputContentSource>): IOutputChannelModel;
 
 }
 
-export abstract class AbstractOutputChannelModelService {
+export class OutputChannelModelService implements IOutputChannelModelService {
 
 	declare readonly _serviceBrand: undefined;
 
-	constructor(
-		private readonly outputLocation: URI,
-		@IFileService protected readonly fileService: IFileService,
-		@IInstantiationService protected readonly instantiationService: IInstantiationService
-	) { }
+	private readonly outputLocation: URI;
 
-	createOutputChannelModel(id: string, modelUri: URI, mimeType: 'text/x-code-log-output' | 'text/x-code-output', file?: URI): IOutputChannelModel {
-		return file ? this.instantiationService.createInstance(FileOutputChannelModel, modelUri, mimeType, file) : this.instantiationService.createInstance(DelegatedOutputChannelModel, id, modelUri, mimeType, this.outputDir);
+	constructor(
+		@IFileService private readonly fileService: IFileService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService
+	) {
+		this.outputLocation = joinPath(environmentService.windowLogsPath, `output_${toLocalISOString(new Date()).replace(/-|:|\.\d+Z$/g, '')}`);
 	}
 
-	private _outputDir: Promise<URI> | null = null;
-	private get outputDir(): Promise<URI> {
+	createOutputChannelModel(id: string, modelUri: URI, language: ILanguageSelection, source?: IOutputContentSource | IOutputContentSource[]): IOutputChannelModel {
+		return source ?
+			Array.isArray(source) ? this.instantiationService.createInstance(MultiFileOutputChannelModel, modelUri, language, source)
+				: this.instantiationService.createInstance(FileOutputChannelModel, modelUri, language, source)
+			: this.instantiationService.createInstance(DelegatedOutputChannelModel, id, modelUri, language, this.outputLocation, this.outputDirPromise);
+	}
+
+	private _outputDir: Promise<void> | null = null;
+	private get outputDirPromise(): Promise<void> {
 		if (!this._outputDir) {
-			this._outputDir = this.fileService.createFolder(this.outputLocation).then(() => this.outputLocation);
+			this._outputDir = this.fileService.createFolder(this.outputLocation).then(() => undefined);
 		}
 		return this._outputDir;
 	}
 
 }
 
-export class OutputChannelModelService extends AbstractOutputChannelModelService implements IOutputChannelModelService {
-
-	constructor(
-		@IInstantiationService instantiationService: IInstantiationService,
-		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
-		@IFileService fileService: IFileService,
-	) {
-		super(joinPath(dirname(environmentService.logFile), toLocalISOString(new Date()).replace(/-|:|\.\d+Z$/g, '')), fileService, instantiationService);
-	}
-}
-
-registerSingleton(IOutputChannelModelService, OutputChannelModelService);
-
+registerSingleton(IOutputChannelModelService, OutputChannelModelService, InstantiationType.Delayed);

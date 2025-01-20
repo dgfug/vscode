@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { IDisposable } from '../../../base/common/lifecycle.js';
+import { URI } from '../../../base/common/uri.js';
+import { createDecorator } from '../../instantiation/common/instantiation.js';
 
 export const IUndoRedoService = createDecorator<IUndoRedoService>('undoRedoService');
 
@@ -16,8 +16,18 @@ export const enum UndoRedoElementType {
 
 export interface IResourceUndoRedoElement {
 	readonly type: UndoRedoElementType.Resource;
+	/**
+	 * The resource impacted by this element.
+	 */
 	readonly resource: URI;
+	/**
+	 * A user presentable label. May be localized.
+	 */
 	readonly label: string;
+	/**
+	 * A code describing the operation. Will not be localized.
+	 */
+	readonly code: string;
 	/**
 	 * Show a message to the user confirming when trying to undo this element
 	 */
@@ -28,8 +38,18 @@ export interface IResourceUndoRedoElement {
 
 export interface IWorkspaceUndoRedoElement {
 	readonly type: UndoRedoElementType.Workspace;
+	/**
+	 * The resources impacted by this element.
+	 */
 	readonly resources: readonly URI[];
+	/**
+	 * A user presentable label. May be localized.
+	 */
 	readonly label: string;
+	/**
+	 * A code describing the operation. Will not be localized.
+	 */
+	readonly code: string;
 	/**
 	 * Show a message to the user confirming when trying to undo this element
 	 */

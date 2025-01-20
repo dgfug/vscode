@@ -3,13 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AddFirstParameterToFunctions } from 'vs/base/common/types';
-import { URI } from 'vs/base/common/uri';
-import { IBackupMainService } from 'vs/platform/backup/electron-main/backup';
-import { IWindowsMainService } from 'vs/platform/windows/electron-main/windows';
-import { IEnterWorkspaceResult, IRecent, IRecentlyOpened, IWorkspaceBackupInfo, IFolderBackupInfo, IWorkspaceFolderCreationData, IWorkspaceIdentifier, IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
-import { IWorkspacesHistoryMainService } from 'vs/platform/workspaces/electron-main/workspacesHistoryMainService';
-import { IWorkspacesManagementMainService } from 'vs/platform/workspaces/electron-main/workspacesManagementMainService';
+import { AddFirstParameterToFunctions } from '../../../base/common/types.js';
+import { URI } from '../../../base/common/uri.js';
+import { IBackupMainService } from '../../backup/electron-main/backup.js';
+import { IWindowsMainService } from '../../windows/electron-main/windows.js';
+import { IEnterWorkspaceResult, IRecent, IRecentlyOpened, IWorkspaceFolderCreationData, IWorkspacesService } from '../common/workspaces.js';
+import { IWorkspaceIdentifier } from '../../workspace/common/workspace.js';
+import { IWorkspacesHistoryMainService } from './workspacesHistoryMainService.js';
+import { IWorkspacesManagementMainService } from './workspacesManagementMainService.js';
+import { IWorkspaceBackupInfo, IFolderBackupInfo } from '../../backup/common/backup.js';
 
 export class WorkspacesMainService implements AddFirstParameterToFunctions<IWorkspacesService, Promise<unknown> /* only methods, not events */, number /* window ID */> {
 
@@ -52,19 +54,19 @@ export class WorkspacesMainService implements AddFirstParameterToFunctions<IWork
 
 	readonly onDidChangeRecentlyOpened = this.workspacesHistoryMainService.onDidChangeRecentlyOpened;
 
-	 getRecentlyOpened(windowId: number): Promise<IRecentlyOpened> {
-		return this.workspacesHistoryMainService.getRecentlyOpened(this.windowsMainService.getWindowById(windowId));
+	getRecentlyOpened(windowId: number): Promise<IRecentlyOpened> {
+		return this.workspacesHistoryMainService.getRecentlyOpened();
 	}
 
-	 addRecentlyOpened(windowId: number, recents: IRecent[]): Promise<void> {
+	addRecentlyOpened(windowId: number, recents: IRecent[]): Promise<void> {
 		return this.workspacesHistoryMainService.addRecentlyOpened(recents);
 	}
 
-	 removeRecentlyOpened(windowId: number, paths: URI[]): Promise<void> {
+	removeRecentlyOpened(windowId: number, paths: URI[]): Promise<void> {
 		return this.workspacesHistoryMainService.removeRecentlyOpened(paths);
 	}
 
-	 clearRecentlyOpened(windowId: number): Promise<void> {
+	clearRecentlyOpened(windowId: number): Promise<void> {
 		return this.workspacesHistoryMainService.clearRecentlyOpened();
 	}
 

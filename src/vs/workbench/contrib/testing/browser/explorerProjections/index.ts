@@ -3,14 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ObjectTree } from 'vs/base/browser/ui/tree/objectTree';
-import { Event } from 'vs/base/common/event';
-import { FuzzyScore } from 'vs/base/common/filters';
-import { IMarkdownString } from 'vs/base/common/htmlContent';
-import { Iterable } from 'vs/base/common/iterator';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { MarshalledId } from 'vs/base/common/marshalling';
-import { InternalTestItem, ITestItemContext, TestResultState } from 'vs/workbench/contrib/testing/common/testCollection';
+import { IIdentityProvider } from '../../../../../base/browser/ui/list/list.js';
+import { ObjectTree } from '../../../../../base/browser/ui/tree/objectTree.js';
+import { IObjectTreeElement, ObjectTreeElementCollapseState } from '../../../../../base/browser/ui/tree/tree.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
+import { FuzzyScore } from '../../../../../base/common/filters.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
+import { Iterable } from '../../../../../base/common/iterator.js';
+import { IDisposable } from '../../../../../base/common/lifecycle.js';
+import { MarshalledId } from '../../../../../base/common/marshallingIds.js';
+import { ISerializedTestTreeCollapseState, isCollapsedInSerializedTestTree } from './testingViewState.js';
+import { ITestItemContext, InternalTestItem, TestItemExpandState, TestResultState } from '../../common/testTypes.js';
 
 /**
  * Describes a rendering of tests in the explorer view. Different
@@ -24,6 +27,11 @@ export interface ITestTreeProjection extends IDisposable {
 	 * Event that fires when the projection changes.
 	 */
 	onUpdate: Event<void>;
+
+	/**
+	 * State to use for applying default collapse state of items.
+	 */
+	lastState: ISerializedTestTreeCollapseState;
 
 	/**
 	 * Fired when an element in the tree is expanded.
@@ -41,79 +49,32 @@ export interface ITestTreeProjection extends IDisposable {
 	applyTo(tree: ObjectTree<TestExplorerTreeElement, FuzzyScore>): void;
 }
 
-/**
- * Interface describing the workspace folder and test item tree elements.
- */
-export interface IActionableTestTreeElement {
-	/**
-	 * Parent tree item.
-	 */
-	parent: IActionableTestTreeElement | null;
-
-	/**
-	 * Unique ID of the element in the tree.
-	 */
-	treeId: string;
-
-	/**
-	 * Test children of this item.
-	 */
-	children: Set<TestExplorerTreeElement>;
-
-	/**
-	 * Depth of the element in the tree.
-	 */
-	depth: number;
-
-	/**
-	 * Iterable of the tests this element contains.
-	 */
-	tests: Iterable<InternalTestItem>;
-
-	/**
-	 * State to show on the item. This is generally the item's computed state
-	 * from its children.
-	 */
-	state: TestResultState;
-
-	/**
-	 * Time it took this test/item to run.
-	 */
-	duration: number | undefined;
-
-	/**
-	 * Label for the item.
-	 */
-	label: string;
-}
-
 let idCounter = 0;
 
 const getId = () => String(idCounter++);
 
-export class TestItemTreeElement implements IActionableTestTreeElement {
+export abstract class TestItemTreeElement {
+	protected readonly changeEmitter = new Emitter<void>();
+
 	/**
-	 * @inheritdoc
+	 * Fired whenever the element or test properties change.
+	 */
+	public readonly onChange = this.changeEmitter.event;
+
+	/**
+	 * Tree children of this item.
 	 */
 	public readonly children = new Set<TestExplorerTreeElement>();
 
 	/**
-	 * @inheritdoc
+	 * Unique ID of the element in the tree.
 	 */
-	public readonly treeId = this.test.item.extId;
+	public readonly treeId = getId();
 
 	/**
-	 * @inheritdoc
+	 * Depth of the element in the tree.
 	 */
 	public depth: number = this.parent ? this.parent.depth + 1 : 0;
-
-	public get tests() {
-		return Iterable.single(this.test);
-	}
-
-	public get description() {
-		return this.test.item.description;
-	}
 
 	/**
 	 * Whether the node's test result is 'retired' -- from an outdated test run.
@@ -121,19 +82,10 @@ export class TestItemTreeElement implements IActionableTestTreeElement {
 	public retired = false;
 
 	/**
-	 * @inheritdoc
+	 * State to show on the item. This is generally the item's computed state
+	 * from its children.
 	 */
 	public state = TestResultState.Unset;
-
-	/**
-	 * Own, non-computed state.
-	 */
-	public ownState = TestResultState.Unset;
-
-	/**
-	 * Own, non-computed duration.
-	 */
-	public ownDuration: number | undefined;
 
 	/**
 	 * Time it took this test/item to run.
@@ -141,14 +93,16 @@ export class TestItemTreeElement implements IActionableTestTreeElement {
 	public duration: number | undefined;
 
 	/**
-	 * @inheritdoc
+	 * Tree element description.
 	 */
-	public get label() {
-		return this.test.item.label;
-	}
+	public abstract description: string | null;
 
 	constructor(
 		public readonly test: InternalTestItem,
+		/**
+		 * Parent tree item. May not actually be the test item who owns this one
+		 * in a 'flat' projection.
+		 */
 		public readonly parent: TestItemTreeElement | null = null,
 	) { }
 
@@ -159,11 +113,11 @@ export class TestItemTreeElement implements IActionableTestTreeElement {
 
 		const context: ITestItemContext = {
 			$mid: MarshalledId.TestItemContext,
-			tests: [this.test],
+			tests: [InternalTestItem.serialize(this.test)],
 		};
 
 		for (let p = this.parent; p && p.depth > 0; p = p.parent) {
-			context.tests.unshift(p.test);
+			context.tests.unshift(InternalTestItem.serialize(p.test));
 		}
 
 		return context;
@@ -185,3 +139,45 @@ export class TestTreeErrorMessage {
 }
 
 export type TestExplorerTreeElement = TestItemTreeElement | TestTreeErrorMessage;
+
+export const testIdentityProvider: IIdentityProvider<TestExplorerTreeElement> = {
+	getId(element) {
+		// For "not expandable" elements, whether they have children is part of the
+		// ID so they're rerendered if that changes (#204805)
+		const expandComponent = element instanceof TestTreeErrorMessage
+			? 'error'
+			: element.test.expand === TestItemExpandState.NotExpandable
+				? !!element.children.size
+				: element.test.expand;
+
+		return element.treeId + '\0' + expandComponent;
+	}
+};
+
+export const getChildrenForParent = (serialized: ISerializedTestTreeCollapseState, rootsWithChildren: Iterable<TestExplorerTreeElement>, node: TestExplorerTreeElement | null): Iterable<IObjectTreeElement<TestExplorerTreeElement>> => {
+	let it: Iterable<TestExplorerTreeElement>;
+	if (node === null) { // roots
+		const rootsWithChildrenArr = [...rootsWithChildren];
+		if (rootsWithChildrenArr.length === 1) {
+			return getChildrenForParent(serialized, rootsWithChildrenArr, rootsWithChildrenArr[0]);
+		}
+		it = rootsWithChildrenArr;
+	} else {
+		it = node.children;
+	}
+
+	return Iterable.map(it, element => (
+		element instanceof TestTreeErrorMessage
+			? { element }
+			: {
+				element,
+				collapsible: element.test.expand !== TestItemExpandState.NotExpandable,
+				collapsed: element.test.item.error
+					? ObjectTreeElementCollapseState.PreserveOrExpanded
+					: (isCollapsedInSerializedTestTree(serialized, element.test.item.extId) ?? element.depth > 0
+						? ObjectTreeElementCollapseState.PreserveOrCollapsed
+						: ObjectTreeElementCollapseState.PreserveOrExpanded),
+				children: getChildrenForParent(serialized, rootsWithChildren, element),
+			}
+	));
+};

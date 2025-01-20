@@ -3,16 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { ConfigurationChangedEvent, IComputedEditorOptions, IEditorOptions } from 'vs/editor/common/config/editorOptions';
-import { IDimension } from 'vs/editor/common/editorCommon';
+import { Event } from '../../../base/common/event.js';
+import { IDisposable } from '../../../base/common/lifecycle.js';
+import { ConfigurationChangedEvent, IComputedEditorOptions, IEditorOptions } from './editorOptions.js';
+import { IDimension } from '../core/dimension.js';
+import { MenuId } from '../../../platform/actions/common/actions.js';
 
 export interface IEditorConfiguration extends IDisposable {
 	/**
 	 * Is this a simple widget (not a real code editor)?
 	 */
 	readonly isSimpleWidget: boolean;
+	/**
+	 * The context menu id for the editor.
+	 */
+	readonly contextMenuId: MenuId;
 	/**
 	 * Computed editor options.
 	 */
@@ -40,10 +45,6 @@ export interface IEditorConfiguration extends IDisposable {
 	 */
 	observeContainer(dimension?: IDimension): void;
 	/**
-	 * Recompute options with new pixel ratio.
-	 */
-	observePixelRatio(): void;
-	/**
 	 * Set if the current model is dominated by long lines.
 	 */
 	setIsDominatedByLongLines(isDominatedByLongLines: boolean): void;
@@ -59,4 +60,8 @@ export interface IEditorConfiguration extends IDisposable {
 	 * Set reserved height above.
 	 */
 	setReservedHeight(reservedHeight: number): void;
+	/**
+	 * Set the number of decoration lanes to be rendered in the glyph margin.
+	 */
+	setGlyphMarginDecorationLaneCount(decorationLaneCount: number): void;
 }

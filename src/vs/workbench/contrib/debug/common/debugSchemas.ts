@@ -3,12 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as extensionsRegistry from 'vs/workbench/services/extensions/common/extensionsRegistry';
-import * as nls from 'vs/nls';
-import { IDebuggerContribution, ICompound } from 'vs/workbench/contrib/debug/common/debug';
-import { launchSchemaId } from 'vs/workbench/services/configuration/common/configuration';
-import { IJSONSchema } from 'vs/base/common/jsonSchema';
-import { inputsSchema } from 'vs/workbench/services/configurationResolver/common/configurationResolverSchema';
+import * as extensionsRegistry from '../../../services/extensions/common/extensionsRegistry.js';
+import * as nls from '../../../../nls.js';
+import { IDebuggerContribution, ICompound, IBreakpointContribution } from './debug.js';
+import { launchSchemaId } from '../../../services/configuration/common/configuration.js';
+import { IJSONSchema } from '../../../../base/common/jsonSchema.js';
+import { inputsSchema } from '../../../services/configurationResolver/common/configurationResolverSchema.js';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { Extensions, IExtensionFeatureTableRenderer, IExtensionFeaturesRegistry, IRenderedData, IRowData, ITableData } from '../../../services/extensionManagement/common/extensionFeatures.js';
+import { IExtensionManifest } from '../../../../platform/extensions/common/extensions.js';
+import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
 
 // debuggers extension point
 export const debuggersExtPoint = extensionsRegistry.ExtensionsRegistry.registerExtensionPoint<IDebuggerContribution[]>({
@@ -68,7 +73,17 @@ export const debuggersExtPoint = extensionsRegistry.ExtensionsRegistry.registerE
 					type: 'object'
 				},
 				when: {
-					description: nls.localize('vscode.extension.contributes.debuggers.when', "Condition which must be true to enable this type of debugger. Consider using 'shellExecutionSupported', 'virtualWorkspace', 'resourceScheme' or an extension defined context key as appropriate for this."),
+					description: nls.localize('vscode.extension.contributes.debuggers.when', "Condition which must be true to enable this type of debugger. Consider using 'shellExecutionSupported', 'virtualWorkspace', 'resourceScheme' or an extension-defined context key as appropriate for this."),
+					type: 'string',
+					default: ''
+				},
+				hiddenWhen: {
+					description: nls.localize('vscode.extension.contributes.debuggers.hiddenWhen', "When this condition is true, this debugger type is hidden from the debugger list, but is still enabled."),
+					type: 'string',
+					default: ''
+				},
+				deprecated: {
+					description: nls.localize('vscode.extension.contributes.debuggers.deprecated', "Optional message to mark this debug type as being deprecated."),
 					type: 'string',
 					default: ''
 				},
@@ -101,18 +116,24 @@ export const debuggersExtPoint = extensionsRegistry.ExtensionsRegistry.registerE
 							type: 'string'
 						}
 					}
+				},
+				strings: {
+					description: nls.localize('vscode.extension.contributes.debuggers.strings', "UI strings contributed by this debug adapter."),
+					type: 'object',
+					properties: {
+						unverifiedBreakpoints: {
+							description: nls.localize('vscode.extension.contributes.debuggers.strings.unverifiedBreakpoints', "When there are unverified breakpoints in a language supported by this debug adapter, this message will appear on the breakpoint hover and in the breakpoints view. Markdown and command links are supported."),
+							type: 'string'
+						}
+					}
 				}
 			}
 		}
 	}
 });
 
-export interface IRawBreakpointContribution {
-	language: string;
-}
-
 // breakpoints extension point #9037
-export const breakpointsExtPoint = extensionsRegistry.ExtensionsRegistry.registerExtensionPoint<IRawBreakpointContribution[]>({
+export const breakpointsExtPoint = extensionsRegistry.ExtensionsRegistry.registerExtensionPoint<IBreakpointContribution[]>({
 	extensionPoint: 'breakpoints',
 	jsonSchema: {
 		description: nls.localize('vscode.extension.contributes.breakpoints', 'Contributes breakpoints.'),
@@ -127,6 +148,11 @@ export const breakpointsExtPoint = extensionsRegistry.ExtensionsRegistry.registe
 					description: nls.localize('vscode.extension.contributes.breakpoints.language', "Allow breakpoints for this language."),
 					type: 'string'
 				},
+				when: {
+					description: nls.localize('vscode.extension.contributes.breakpoints.when', "Condition which must be true to enable breakpoints in this language. Consider matching this to the debugger when clause as appropriate."),
+					type: 'string',
+					default: ''
+				}
 			}
 		}
 	}
@@ -240,3 +266,49 @@ export const launchSchema: IJSONSchema = {
 		inputs: inputsSchema.definitions!.inputs
 	}
 };
+
+class DebuggersDataRenderer extends Disposable implements IExtensionFeatureTableRenderer {
+
+	readonly type = 'table';
+
+	shouldRender(manifest: IExtensionManifest): boolean {
+		return !!manifest.contributes?.debuggers;
+	}
+
+	render(manifest: IExtensionManifest): IRenderedData<ITableData> {
+		const contrib = manifest.contributes?.debuggers || [];
+		if (!contrib.length) {
+			return { data: { headers: [], rows: [] }, dispose: () => { } };
+		}
+
+		const headers = [
+			nls.localize('debugger name', "Name"),
+			nls.localize('debugger type', "Type"),
+		];
+
+		const rows: IRowData[][] = contrib.map(d => {
+			return [
+				d.label ?? '',
+				d.type
+			];
+		});
+
+		return {
+			data: {
+				headers,
+				rows
+			},
+			dispose: () => { }
+		};
+	}
+}
+
+Registry.as<IExtensionFeaturesRegistry>(Extensions.ExtensionFeaturesRegistry).registerExtensionFeature({
+	id: 'debuggers',
+	label: nls.localize('debuggers', "Debuggers"),
+	access: {
+		canToggle: false
+	},
+	renderer: new SyncDescriptor(DebuggersDataRenderer),
+});
+

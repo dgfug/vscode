@@ -4,46 +4,142 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { ModelOperations, ModelResult } from '@vscode/vscode-languagedetection';
-import { StopWatch } from 'vs/base/common/stopwatch';
-import { IRequestHandler } from 'vs/base/common/worker/simpleWorker';
-import { EditorSimpleWorker } from 'vs/editor/common/services/editorSimpleWorker';
-import { EditorWorkerHost } from 'vs/editor/common/services/editorWorkerService';
+import { importAMDNodeModule } from '../../../../amdX.js';
+import { StopWatch } from '../../../../base/common/stopwatch.js';
+import { IRequestHandler, IWorkerServer } from '../../../../base/common/worker/simpleWorker.js';
+import { LanguageDetectionWorkerHost, ILanguageDetectionWorker } from './languageDetectionWorker.protocol.js';
+import { WorkerTextModelSyncServer } from '../../../../editor/common/services/textModelSync/textModelSync.impl.js';
+
+type RegexpModel = { detect: (inp: string, langBiases: Record<string, number>, supportedLangs?: string[]) => string | undefined };
 
 /**
- * Called on the worker side
- * @internal
+ * Defines the worker entry point. Must be exported and named `create`.
+ * @skipMangle
  */
-export function create(host: EditorWorkerHost): IRequestHandler {
-	return new LanguageDetectionSimpleWorker(host, null);
+export function create(workerServer: IWorkerServer): IRequestHandler {
+	return new LanguageDetectionSimpleWorker(workerServer);
 }
 
 /**
  * @internal
  */
-export class LanguageDetectionSimpleWorker extends EditorSimpleWorker {
+export class LanguageDetectionSimpleWorker implements ILanguageDetectionWorker {
+	_requestHandlerBrand: any;
+
 	private static readonly expectedRelativeConfidence = 0.2;
 	private static readonly positiveConfidenceCorrectionBucket1 = 0.05;
 	private static readonly positiveConfidenceCorrectionBucket2 = 0.025;
 	private static readonly negativeConfidenceCorrection = 0.5;
 
+	private readonly _workerTextModelSyncServer = new WorkerTextModelSyncServer();
+
+	private readonly _host: LanguageDetectionWorkerHost;
+	private _regexpModel: RegexpModel | undefined;
+	private _regexpLoadFailed: boolean = false;
+
 	private _modelOperations: ModelOperations | undefined;
 	private _loadFailed: boolean = false;
 
-	public async detectLanguage(uri: string): Promise<string | undefined> {
+	private modelIdToCoreId = new Map<string, string | undefined>();
+
+	constructor(workerServer: IWorkerServer) {
+		this._host = LanguageDetectionWorkerHost.getChannel(workerServer);
+		this._workerTextModelSyncServer.bindToServer(workerServer);
+	}
+
+	public async $detectLanguage(uri: string, langBiases: Record<string, number> | undefined, preferHistory: boolean, supportedLangs?: string[]): Promise<string | undefined> {
 		const languages: string[] = [];
 		const confidences: number[] = [];
-		const stopWatch = new StopWatch(true);
-		for await (const language of this.detectLanguagesImpl(uri)) {
-			languages.push(language.languageId);
-			confidences.push(language.confidence);
-		}
-		stopWatch.stop();
+		const stopWatch = new StopWatch();
+		const documentTextSample = this.getTextForDetection(uri);
+		if (!documentTextSample) { return; }
 
-		if (languages.length) {
-			this._host.fhr('sendTelemetryEvent', [languages, confidences, stopWatch.elapsed()]);
-			return languages[0];
+		const neuralResolver = async () => {
+			for await (const language of this.detectLanguagesImpl(documentTextSample)) {
+				if (!this.modelIdToCoreId.has(language.languageId)) {
+					this.modelIdToCoreId.set(language.languageId, await this._host.$getLanguageId(language.languageId));
+				}
+				const coreId = this.modelIdToCoreId.get(language.languageId);
+				if (coreId && (!supportedLangs?.length || supportedLangs.includes(coreId))) {
+					languages.push(coreId);
+					confidences.push(language.confidence);
+				}
+			}
+			stopWatch.stop();
+
+			if (languages.length) {
+				this._host.$sendTelemetryEvent(languages, confidences, stopWatch.elapsed());
+				return languages[0];
+			}
+			return undefined;
+		};
+
+		const historicalResolver = async () => this.runRegexpModel(documentTextSample, langBiases ?? {}, supportedLangs);
+
+		if (preferHistory) {
+			const history = await historicalResolver();
+			if (history) { return history; }
+			const neural = await neuralResolver();
+			if (neural) { return neural; }
+		} else {
+			const neural = await neuralResolver();
+			if (neural) { return neural; }
+			const history = await historicalResolver();
+			if (history) { return history; }
 		}
+
 		return undefined;
+	}
+
+	private getTextForDetection(uri: string): string | undefined {
+		const editorModel = this._workerTextModelSyncServer.getModel(uri);
+		if (!editorModel) { return; }
+
+		const end = editorModel.positionAt(10000);
+		const content = editorModel.getValueInRange({
+			startColumn: 1,
+			startLineNumber: 1,
+			endColumn: end.column,
+			endLineNumber: end.lineNumber
+		});
+		return content;
+	}
+
+	private async getRegexpModel(): Promise<RegexpModel | undefined> {
+		if (this._regexpLoadFailed) {
+			return;
+		}
+		if (this._regexpModel) {
+			return this._regexpModel;
+		}
+		const uri: string = await this._host.$getRegexpModelUri();
+		try {
+			this._regexpModel = await importAMDNodeModule(uri, '') as RegexpModel;
+			return this._regexpModel;
+		} catch (e) {
+			this._regexpLoadFailed = true;
+			// console.warn('error loading language detection model', e);
+			return;
+		}
+	}
+
+	private async runRegexpModel(content: string, langBiases: Record<string, number>, supportedLangs?: string[]): Promise<string | undefined> {
+		const regexpModel = await this.getRegexpModel();
+		if (!regexpModel) { return; }
+
+		if (supportedLangs?.length) {
+			// When using supportedLangs, normally computed biases are too extreme. Just use a "bitmask" of sorts.
+			for (const lang of Object.keys(langBiases)) {
+				if (supportedLangs.includes(lang)) {
+					langBiases[lang] = 1;
+				} else {
+					langBiases[lang] = 0;
+				}
+			}
+		}
+
+		const detected = regexpModel.detect(content, langBiases, supportedLangs);
+		return detected;
 	}
 
 	private async getModelOperations(): Promise<ModelOperations> {
@@ -51,11 +147,11 @@ export class LanguageDetectionSimpleWorker extends EditorSimpleWorker {
 			return this._modelOperations;
 		}
 
-		const uri: string = await this._host.fhr('getIndexJsUri', []);
-		const { ModelOperations } = await import(uri) as typeof import('@vscode/vscode-languagedetection');
+		const uri: string = await this._host.$getIndexJsUri();
+		const { ModelOperations } = await importAMDNodeModule(uri, '') as typeof import('@vscode/vscode-languagedetection');
 		this._modelOperations = new ModelOperations({
 			modelJsonLoaderFunc: async () => {
-				const response = await fetch(await this._host.fhr('getModelJsonUri', []));
+				const response = await fetch(await this._host.$getModelJsonUri());
 				try {
 					const modelJSON = await response.json();
 					return modelJSON;
@@ -65,13 +161,13 @@ export class LanguageDetectionSimpleWorker extends EditorSimpleWorker {
 				}
 			},
 			weightsLoaderFunc: async () => {
-				const response = await fetch(await this._host.fhr('getWeightsUri', []));
+				const response = await fetch(await this._host.$getWeightsUri());
 				const buffer = await response.arrayBuffer();
 				return buffer;
 			}
 		});
 
-		return this._modelOperations!;
+		return this._modelOperations;
 	}
 
 	// This adjusts the language confidence scores to be more accurate based on:
@@ -82,21 +178,21 @@ export class LanguageDetectionSimpleWorker extends EditorSimpleWorker {
 			// For the following languages, we increase the confidence because
 			// these are commonly used languages in VS Code and supported
 			// by the model.
-			case 'javascript':
+			case 'js':
 			case 'html':
 			case 'json':
-			case 'typescript':
+			case 'ts':
 			case 'css':
-			case 'python':
+			case 'py':
 			case 'xml':
 			case 'php':
 				modelResult.confidence += LanguageDetectionSimpleWorker.positiveConfidenceCorrectionBucket1;
 				break;
 			// case 'yaml': // YAML has been know to cause incorrect language detection because the language is pretty simple. We don't want to increase the confidence for this.
 			case 'cpp':
-			case 'shellscript':
+			case 'sh':
 			case 'java':
-			case 'csharp':
+			case 'cs':
 			case 'c':
 				modelResult.confidence += LanguageDetectionSimpleWorker.positiveConfidenceCorrectionBucket2;
 				break;
@@ -127,7 +223,7 @@ export class LanguageDetectionSimpleWorker extends EditorSimpleWorker {
 		return modelResult;
 	}
 
-	private async * detectLanguagesImpl(uri: string): AsyncGenerator<ModelResult, void, unknown> {
+	private async * detectLanguagesImpl(content: string): AsyncGenerator<ModelResult, void, unknown> {
 		if (this._loadFailed) {
 			return;
 		}
@@ -141,20 +237,8 @@ export class LanguageDetectionSimpleWorker extends EditorSimpleWorker {
 			return;
 		}
 
-		const model = this._getModel(uri);
-		if (!model) {
-			return;
-		}
-
 		let modelResults: ModelResult[] | undefined;
-		// Grab the first 10000 characters
-		const end = model.positionAt(10000);
-		const content = model.getValueInRange({
-			startColumn: 1,
-			startLineNumber: 1,
-			endColumn: end.column,
-			endLineNumber: end.lineNumber
-		});
+
 		try {
 			modelResults = await modelOperations.runModel(content);
 		} catch (e) {

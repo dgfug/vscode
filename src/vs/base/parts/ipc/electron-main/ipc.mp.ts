@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { BrowserWindow, ipcMain, IpcMainEvent, MessagePortMain } from 'electron';
-import { Event } from 'vs/base/common/event';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { generateUuid } from 'vs/base/common/uuid';
-import { Client as MessagePortClient } from 'vs/base/parts/ipc/common/ipc.mp';
+import { BrowserWindow, IpcMainEvent, MessagePortMain } from 'electron';
+import { validatedIpcMain } from './ipcMain.js';
+import { Event } from '../../../common/event.js';
+import { IDisposable } from '../../../common/lifecycle.js';
+import { generateUuid } from '../../../common/uuid.js';
+import { Client as MessagePortClient } from '../common/ipc.mp.js';
 
 /**
  * An implementation of a `IPCClient` on top of Electron `MessagePortMain`.
@@ -50,7 +51,7 @@ export async function connect(window: BrowserWindow): Promise<MessagePortMain> {
 	// Wait until the window has returned the `MessagePort`
 	// We need to filter by the `nonce` to ensure we listen
 	// to the right response.
-	const onMessageChannelResult = Event.fromNodeEventEmitter<{ nonce: string, port: MessagePortMain }>(ipcMain, 'vscode:createMessageChannelResult', (e: IpcMainEvent, nonce: string) => ({ nonce, port: e.ports[0] }));
+	const onMessageChannelResult = Event.fromNodeEventEmitter<{ nonce: string; port: MessagePortMain }>(validatedIpcMain, 'vscode:createMessageChannelResult', (e: IpcMainEvent, nonce: string) => ({ nonce, port: e.ports[0] }));
 	const { port } = await Event.toPromise(Event.once(Event.filter(onMessageChannelResult, e => e.nonce === nonce)));
 
 	return port;

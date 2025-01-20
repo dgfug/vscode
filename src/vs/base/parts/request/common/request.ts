@@ -3,10 +3,36 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBufferReadableStream } from 'vs/base/common/buffer';
+import { VSBufferReadableStream } from '../../../common/buffer.js';
+
+const offlineName = 'Offline';
+
+/**
+ * Checks if the given error is offline error
+ */
+export function isOfflineError(error: any): boolean {
+	if (error instanceof OfflineError) {
+		return true;
+	}
+	return error instanceof Error && error.name === offlineName && error.message === offlineName;
+}
+
+export class OfflineError extends Error {
+	constructor() {
+		super(offlineName);
+		this.name = this.message;
+	}
+}
 
 export interface IHeaders {
-	[header: string]: string;
+	'Proxy-Authorization'?: string;
+	'x-operation-id'?: string;
+	'retry-after'?: string;
+	etag?: string;
+	'Content-Length'?: string;
+	'activityid'?: string;
+	'X-Market-User-Id'?: string;
+	[header: string]: string | string[] | undefined;
 }
 
 export interface IRequestOptions {
@@ -19,6 +45,11 @@ export interface IRequestOptions {
 	data?: string;
 	followRedirects?: number;
 	proxyAuthorization?: string;
+	/**
+	 * A signal to not cache the response. This may not
+	 * be supported in all implementations.
+	 */
+	disableCache?: boolean;
 }
 
 export interface IRequestContext {

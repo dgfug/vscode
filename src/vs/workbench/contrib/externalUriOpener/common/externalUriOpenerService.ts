@@ -3,24 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { firstOrDefault } from 'vs/base/common/arrays';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { Iterable } from 'vs/base/common/iterator';
-import { Disposable, IDisposable } from 'vs/base/common/lifecycle';
-import { LinkedList } from 'vs/base/common/linkedList';
-import { isWeb } from 'vs/base/common/platform';
-import { URI } from 'vs/base/common/uri';
-import * as modes from 'vs/editor/common/languages';
-import * as nls from 'vs/nls';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { ILogService } from 'vs/platform/log/common/log';
-import { IExternalOpener, IOpenerService } from 'vs/platform/opener/common/opener';
-import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from 'vs/platform/quickinput/common/quickInput';
-import { IStorageService } from 'vs/platform/storage/common/storage';
-import { defaultExternalUriOpenerId, ExternalUriOpenersConfiguration, externalUriOpenersSettingId } from 'vs/workbench/contrib/externalUriOpener/common/configuration';
-import { testUrlMatchesGlob } from 'vs/workbench/contrib/url/common/urlGlob';
-import { IPreferencesService } from 'vs/workbench/services/preferences/common/preferences';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { Iterable } from '../../../../base/common/iterator.js';
+import { Disposable, IDisposable } from '../../../../base/common/lifecycle.js';
+import { LinkedList } from '../../../../base/common/linkedList.js';
+import { isWeb } from '../../../../base/common/platform.js';
+import { URI } from '../../../../base/common/uri.js';
+import * as languages from '../../../../editor/common/languages.js';
+import * as nls from '../../../../nls.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { IExternalOpener, IOpenerService } from '../../../../platform/opener/common/opener.js';
+import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../platform/quickinput/common/quickInput.js';
+import { defaultExternalUriOpenerId, ExternalUriOpenersConfiguration, externalUriOpenersSettingId } from './configuration.js';
+import { testUrlMatchesGlob } from '../../url/common/urlGlob.js';
+import { IPreferencesService } from '../../../services/preferences/common/preferences.js';
 
 
 export const IExternalUriOpenerService = createDecorator<IExternalUriOpenerService>('externalUriOpenerService');
@@ -34,12 +32,12 @@ export interface IExternalUriOpener {
 	readonly id: string;
 	readonly label: string;
 
-	canOpen(uri: URI, token: CancellationToken): Promise<modes.ExternalUriOpenerPriority>;
+	canOpen(uri: URI, token: CancellationToken): Promise<languages.ExternalUriOpenerPriority>;
 	openExternalUri(uri: URI, ctx: { sourceUri: URI }, token: CancellationToken): Promise<boolean>;
 }
 
 export interface IExternalUriOpenerService {
-	readonly _serviceBrand: undefined
+	readonly _serviceBrand: undefined;
 
 	/**
 	 * Registers a provider for external resources openers.
@@ -50,7 +48,7 @@ export interface IExternalUriOpenerService {
 	 * Get the configured IExternalUriOpener for the the uri.
 	 * If there is no opener configured, then returns the first opener that can handle the uri.
 	 */
-	getOpener(uri: URI, ctx: { sourceUri: URI, preferredOpenerId?: string }, token: CancellationToken): Promise<IExternalUriOpener | undefined>;
+	getOpener(uri: URI, ctx: { sourceUri: URI; preferredOpenerId?: string }, token: CancellationToken): Promise<IExternalUriOpener | undefined>;
 }
 
 export class ExternalUriOpenerService extends Disposable implements IExternalUriOpenerService, IExternalOpener {
@@ -61,7 +59,6 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 
 	constructor(
 		@IOpenerService openerService: IOpenerService,
-		@IStorageService storageService: IStorageService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ILogService private readonly logService: ILogService,
 		@IPreferencesService private readonly preferencesService: IPreferencesService,
@@ -76,7 +73,7 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 		return { dispose: remove };
 	}
 
-	private async getOpeners(targetUri: URI, allowOptional: boolean, ctx: { sourceUri: URI, preferredOpenerId?: string }, token: CancellationToken): Promise<IExternalUriOpener[]> {
+	private async getOpeners(targetUri: URI, allowOptional: boolean, ctx: { sourceUri: URI; preferredOpenerId?: string }, token: CancellationToken): Promise<IExternalUriOpener[]> {
 		const allOpeners = await this.getAllOpenersForUri(targetUri);
 
 		if (allOpeners.size === 0) {
@@ -104,9 +101,9 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 		}
 
 		// Then check to see if there is a valid opener
-		const validOpeners: Array<{ opener: IExternalUriOpener, priority: modes.ExternalUriOpenerPriority }> = [];
+		const validOpeners: Array<{ opener: IExternalUriOpener; priority: languages.ExternalUriOpenerPriority }> = [];
 		await Promise.all(Array.from(allOpeners.values()).map(async opener => {
-			let priority: modes.ExternalUriOpenerPriority;
+			let priority: languages.ExternalUriOpenerPriority;
 			try {
 				priority = await opener.canOpen(ctx.sourceUri, token);
 			} catch (e) {
@@ -115,9 +112,9 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 			}
 
 			switch (priority) {
-				case modes.ExternalUriOpenerPriority.Option:
-				case modes.ExternalUriOpenerPriority.Default:
-				case modes.ExternalUriOpenerPriority.Preferred:
+				case languages.ExternalUriOpenerPriority.Option:
+				case languages.ExternalUriOpenerPriority.Default:
+				case languages.ExternalUriOpenerPriority.Preferred:
 					validOpeners.push({ opener, priority });
 					break;
 			}
@@ -128,20 +125,20 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 		}
 
 		// See if we have a preferred opener first
-		const preferred = firstOrDefault(validOpeners.filter(x => x.priority === modes.ExternalUriOpenerPriority.Preferred));
+		const preferred = validOpeners.filter(x => x.priority === languages.ExternalUriOpenerPriority.Preferred).at(0);
 		if (preferred) {
 			return [preferred.opener];
 		}
 
 		// See if we only have optional openers, use the default opener
-		if (!allowOptional && validOpeners.every(x => x.priority === modes.ExternalUriOpenerPriority.Option)) {
+		if (!allowOptional && validOpeners.every(x => x.priority === languages.ExternalUriOpenerPriority.Option)) {
 			return [];
 		}
 
 		return validOpeners.map(value => value.opener);
 	}
 
-	async openExternal(href: string, ctx: { sourceUri: URI, preferredOpenerId?: string }, token: CancellationToken): Promise<boolean> {
+	async openExternal(href: string, ctx: { sourceUri: URI; preferredOpenerId?: string }, token: CancellationToken): Promise<boolean> {
 
 		const targetUri = typeof href === 'string' ? URI.parse(href) : href;
 
@@ -156,7 +153,7 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 		return this.showOpenerPrompt(allOpeners, targetUri, ctx, token);
 	}
 
-	async getOpener(targetUri: URI, ctx: { sourceUri: URI, preferredOpenerId?: string }, token: CancellationToken): Promise<IExternalUriOpener | undefined> {
+	async getOpener(targetUri: URI, ctx: { sourceUri: URI; preferredOpenerId?: string }, token: CancellationToken): Promise<IExternalUriOpener | undefined> {
 		const allOpeners = await this.getOpeners(targetUri, true, ctx, token);
 		if (allOpeners.length >= 1) {
 			return allOpeners[0];
@@ -177,7 +174,7 @@ export class ExternalUriOpenerService extends Disposable implements IExternalUri
 	private getConfiguredOpenerForUri(openers: Map<string, IExternalUriOpener>, targetUri: URI): IExternalUriOpener | 'default' | undefined {
 		const config = this.configurationService.getValue<ExternalUriOpenersConfiguration>(externalUriOpenersSettingId) || {};
 		for (const [uriGlob, id] of Object.entries(config)) {
-			if (testUrlMatchesGlob(targetUri.toString(), uriGlob)) {
+			if (testUrlMatchesGlob(targetUri, uriGlob)) {
 				if (id === defaultExternalUriOpenerId) {
 					return 'default';
 				}

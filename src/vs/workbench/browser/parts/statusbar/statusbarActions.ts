@@ -3,20 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize } from 'vs/nls';
-import { IStatusbarService } from 'vs/workbench/services/statusbar/browser/statusbar';
-import { Action } from 'vs/base/common/actions';
-import { Parts, IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { KeybindingsRegistry, KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { ServicesAccessor } from 'vs/editor/browser/editorExtensions';
-import { Action2, registerAction2 } from 'vs/platform/actions/common/actions';
-import { CATEGORIES } from 'vs/workbench/common/actions';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { StatusbarViewModel } from 'vs/workbench/browser/parts/statusbar/statusbarModel';
-import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
-
-export const CONTEXT_STATUS_BAR_FOCUSED = new RawContextKey<boolean>('statusBarFocused', false, localize('statusBarFocused', "Whether the status bar has keyboard focus"));
+import { localize, localize2 } from '../../../../nls.js';
+import { IStatusbarService } from '../../../services/statusbar/browser/statusbar.js';
+import { Action } from '../../../../base/common/actions.js';
+import { Parts, IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
+import { KeyCode } from '../../../../base/common/keyCodes.js';
+import { KeybindingsRegistry, KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
+import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js';
+import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { StatusbarViewModel } from './statusbarModel.js';
+import { StatusBarFocused } from '../../../common/contextkeys.js';
+import { getActiveWindow } from '../../../../base/browser/dom.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 
 export class ToggleStatusbarEntryVisibilityAction extends Action {
 
@@ -46,12 +46,26 @@ export class HideStatusbarEntryAction extends Action {
 	}
 }
 
+export class ManageExtensionAction extends Action {
+
+	constructor(
+		private readonly extensionId: string,
+		@ICommandService private readonly commandService: ICommandService
+	) {
+		super('statusbar.manage.extension', localize('manageExtension', "Manage Extension"));
+	}
+
+	override run(): Promise<void> {
+		return this.commandService.executeCommand('_extensions.manage', this.extensionId);
+	}
+}
+
 KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'workbench.statusBar.focusPrevious',
 	weight: KeybindingWeight.WorkbenchContrib,
 	primary: KeyCode.LeftArrow,
 	secondary: [KeyCode.UpArrow],
-	when: CONTEXT_STATUS_BAR_FOCUSED,
+	when: StatusBarFocused,
 	handler: (accessor: ServicesAccessor) => {
 		const statusBarService = accessor.get(IStatusbarService);
 		statusBarService.focusPreviousEntry();
@@ -63,7 +77,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	weight: KeybindingWeight.WorkbenchContrib,
 	primary: KeyCode.RightArrow,
 	secondary: [KeyCode.DownArrow],
-	when: CONTEXT_STATUS_BAR_FOCUSED,
+	when: StatusBarFocused,
 	handler: (accessor: ServicesAccessor) => {
 		const statusBarService = accessor.get(IStatusbarService);
 		statusBarService.focusNextEntry();
@@ -74,7 +88,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'workbench.statusBar.focusFirst',
 	weight: KeybindingWeight.WorkbenchContrib,
 	primary: KeyCode.Home,
-	when: CONTEXT_STATUS_BAR_FOCUSED,
+	when: StatusBarFocused,
 	handler: (accessor: ServicesAccessor) => {
 		const statusBarService = accessor.get(IStatusbarService);
 		statusBarService.focus(false);
@@ -86,7 +100,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'workbench.statusBar.focusLast',
 	weight: KeybindingWeight.WorkbenchContrib,
 	primary: KeyCode.End,
-	when: CONTEXT_STATUS_BAR_FOCUSED,
+	when: StatusBarFocused,
 	handler: (accessor: ServicesAccessor) => {
 		const statusBarService = accessor.get(IStatusbarService);
 		statusBarService.focus(false);
@@ -98,7 +112,7 @@ KeybindingsRegistry.registerCommandAndKeybindingRule({
 	id: 'workbench.statusBar.clearFocus',
 	weight: KeybindingWeight.WorkbenchContrib,
 	primary: KeyCode.Escape,
-	when: CONTEXT_STATUS_BAR_FOCUSED,
+	when: StatusBarFocused,
 	handler: (accessor: ServicesAccessor) => {
 		const statusBarService = accessor.get(IStatusbarService);
 		const editorService = accessor.get(IEditorService);
@@ -115,15 +129,15 @@ class FocusStatusBarAction extends Action2 {
 	constructor() {
 		super({
 			id: 'workbench.action.focusStatusBar',
-			title: { value: localize('focusStatusBar', "Focus Status Bar"), original: 'Focus Status Bar' },
-			category: CATEGORIES.View,
+			title: localize2('focusStatusBar', 'Focus Status Bar'),
+			category: Categories.View,
 			f1: true
 		});
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
-		layoutService.focusPart(Parts.STATUSBAR_PART);
+		layoutService.focusPart(Parts.STATUSBAR_PART, getActiveWindow());
 	}
 }
 

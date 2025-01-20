@@ -3,15 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Color } from 'vs/base/common/color';
-import { ITokenThemeRule, TokenTheme } from 'vs/editor/common/languages/supports/tokenization';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import { IColorTheme, IThemeService } from 'vs/platform/theme/common/themeService';
+import { Color } from '../../../base/common/color.js';
+import { ITokenThemeRule, TokenTheme } from '../../common/languages/supports/tokenization.js';
+import { createDecorator } from '../../../platform/instantiation/common/instantiation.js';
+import { IColorTheme, IThemeService } from '../../../platform/theme/common/themeService.js';
 
 export const IStandaloneThemeService = createDecorator<IStandaloneThemeService>('themeService');
 
-export type BuiltinTheme = 'vs' | 'vs-dark' | 'hc-black';
-export type IColors = { [colorId: string]: string; };
+export type BuiltinTheme = 'vs' | 'vs-dark' | 'hc-black' | 'hc-light';
+export type IColors = { [colorId: string]: string };
 
 export interface IStandaloneThemeData {
 	base: BuiltinTheme;

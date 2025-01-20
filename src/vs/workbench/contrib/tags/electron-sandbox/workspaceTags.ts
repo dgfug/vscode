@@ -3,24 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { sha1Hex } from 'vs/base/browser/hash';
-import { onUnexpectedError } from 'vs/base/common/errors';
-import { URI } from 'vs/base/common/uri';
-import { IFileService, IFileStat } from 'vs/platform/files/common/files';
-import { ITelemetryService, TelemetryLevel } from 'vs/platform/telemetry/common/telemetry';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
-import { ITextFileService, } from 'vs/workbench/services/textfile/common/textfiles';
-import { IWorkspaceTagsService, Tags } from 'vs/workbench/contrib/tags/common/workspaceTags';
-import { IDiagnosticsService, IWorkspaceInformation } from 'vs/platform/diagnostics/common/diagnostics';
-import { IRequestService } from 'vs/platform/request/common/request';
-import { isWindows } from 'vs/base/common/platform';
-import { getRemotes, AllowedSecondLevelDomains, getDomainsOfRemotes } from 'vs/platform/extensionManagement/common/configRemotes';
-import { INativeHostService } from 'vs/platform/native/electron-sandbox/native';
-import { IProductService } from 'vs/platform/product/common/productService';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IFileService, IFileStat } from '../../../../platform/files/common/files.js';
+import { ITelemetryService, TelemetryLevel } from '../../../../platform/telemetry/common/telemetry.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkbenchContribution } from '../../../common/contributions.js';
+import { ITextFileService, } from '../../../services/textfile/common/textfiles.js';
+import { IWorkspaceTagsService, Tags, getHashedRemotesFromConfig as baseGetHashedRemotesFromConfig } from '../common/workspaceTags.js';
+import { IDiagnosticsService, IWorkspaceInformation } from '../../../../platform/diagnostics/common/diagnostics.js';
+import { IRequestService } from '../../../../platform/request/common/request.js';
+import { isWindows } from '../../../../base/common/platform.js';
+import { AllowedSecondLevelDomains, getDomainsOfRemotes } from '../../../../platform/extensionManagement/common/configRemotes.js';
+import { INativeHostService } from '../../../../platform/native/common/native.js';
+import { IProductService } from '../../../../platform/product/common/productService.js';
+import { hashAsync } from '../../../../base/common/hash.js';
 
 export async function getHashedRemotesFromConfig(text: string, stripEndingDotGit: boolean = false): Promise<string[]> {
-	return Promise.all(getRemotes(text, stripEndingDotGit).map(remote => sha1Hex(remote)));
+	return baseGetHashedRemotesFromConfig(text, stripEndingDotGit, hashAsync);
 }
 
 export class WorkspaceTags implements IWorkbenchContribution {
@@ -67,28 +67,28 @@ export class WorkspaceTags implements IWorkbenchContribution {
 			value = 'Unknown';
 		}
 
-		this.telemetryService.publicLog2<{ edition: string }, { edition: { classification: 'SystemMetaData', purpose: 'BusinessInsight' } }>('windowsEdition', { edition: value });
+		this.telemetryService.publicLog2<{ edition: string }, { owner: 'sbatten'; comment: 'Information about the Windows edition.'; edition: { classification: 'SystemMetaData'; purpose: 'BusinessInsight'; comment: 'The Windows edition.' } }>('windowsEdition', { edition: value });
 	}
 
 	private async getWorkspaceInformation(): Promise<IWorkspaceInformation> {
 		const workspace = this.contextService.getWorkspace();
 		const state = this.contextService.getWorkbenchState();
 		const telemetryId = await this.workspaceTagsService.getTelemetryWorkspaceId(workspace, state);
-		return this.telemetryService.getTelemetryInfo().then(info => {
-			return {
-				id: workspace.id,
-				telemetryId,
-				rendererSessionId: info.sessionId,
-				folders: workspace.folders,
-				transient: workspace.transient,
-				configuration: workspace.configuration
-			};
-		});
+
+		return {
+			id: workspace.id,
+			telemetryId,
+			rendererSessionId: this.telemetryService.sessionId,
+			folders: workspace.folders,
+			transient: workspace.transient,
+			configuration: workspace.configuration
+		};
 	}
 
 	private reportWorkspaceTags(tags: Tags): void {
 		/* __GDPR__
 			"workspce.tags" : {
+				"owner": "lramos15",
 				"${include}": [
 					"${WorkspaceTags}"
 				]
@@ -116,6 +116,7 @@ export class WorkspaceTags implements IWorkbenchContribution {
 			set.forEach(item => list.push(item));
 			/* __GDPR__
 				"workspace.remotes" : {
+					"owner": "lramos15",
 					"domains" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
 				}
 			*/
@@ -126,14 +127,7 @@ export class WorkspaceTags implements IWorkbenchContribution {
 	private reportRemotes(workspaceUris: URI[]): void {
 		Promise.all<string[]>(workspaceUris.map(workspaceUri => {
 			return this.workspaceTagsService.getHashedRemotesFromUri(workspaceUri, true);
-		})).then(hashedRemotes => {
-			/* __GDPR__
-					"workspace.hashedRemotes" : {
-						"remotes" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
-					}
-				*/
-			this.telemetryService.publicLog('workspace.hashedRemotes', { remotes: hashedRemotes });
-		}, onUnexpectedError);
+		})).then(() => { }, onUnexpectedError);
 	}
 
 	/* __GDPR__FRAGMENT__
@@ -199,6 +193,7 @@ export class WorkspaceTags implements IWorkbenchContribution {
 			if (Object.keys(tags).length) {
 				/* __GDPR__
 					"workspace.azure" : {
+						"owner": "lramos15",
 						"${include}": [
 							"${AzureTags}"
 						]
@@ -229,10 +224,6 @@ export class WorkspaceTags implements IWorkbenchContribution {
 				if (['DIRECT', 'PROXY', 'HTTPS', 'SOCKS', 'EMPTY'].indexOf(type) === -1) {
 					type = 'UNKNOWN';
 				}
-				type ResolveProxyStatsClassification = {
-					type: { classification: 'SystemMetaData', purpose: 'PerformanceAndHealth' };
-				};
-				this.telemetryService.publicLog2<{ type: String }, ResolveProxyStatsClassification>('resolveProxy.stats', { type });
 			}).then(undefined, onUnexpectedError);
 	}
 }

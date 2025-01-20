@@ -9,8 +9,9 @@
     "vscode": "*"
   },
   "scripts": {
-    "update-grammar": "node ./build/update-grammar.js"
+    "update-grammar": "node ./build/update-grammar.mjs"
   },
+  "categories": ["Programming Languages"],
   "contributes": {
     "languages": [
       {
@@ -20,7 +21,8 @@
           ".dsql"
         ],
         "aliases": [
-          "SQL"
+          "MS SQL",
+          "T-SQL"
         ],
         "configuration": "./language-configuration.json"
       }

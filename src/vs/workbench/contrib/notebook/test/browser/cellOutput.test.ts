@@ -3,242 +3,196 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import * as DOM from 'vs/base/browser/dom';
-import { FastDomNode } from 'vs/base/browser/fastDomNode';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { mock } from 'vs/base/test/common/mock';
-import { IMenuService } from 'vs/platform/actions/common/actions';
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { IOpenerService } from 'vs/platform/opener/common/opener';
-import { ICellOutputViewModel, IRenderOutput, RenderOutputType } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
-import { CodeCellRenderTemplate, IOutputTransformContribution } from 'vs/workbench/contrib/notebook/browser/view/notebookRenderingCommon';
-import { OutputRendererRegistry } from 'vs/workbench/contrib/notebook/browser/view/output/rendererRegistry';
-import { getStringValue } from 'vs/workbench/contrib/notebook/browser/view/output/transforms/richTransform';
-import { CellOutputContainer } from 'vs/workbench/contrib/notebook/browser/view/cellParts/cellOutput';
-import { CodeCellViewModel } from 'vs/workbench/contrib/notebook/browser/viewModel/codeCellViewModel';
-import { NotebookTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookTextModel';
-import { BUILTIN_RENDERER_ID, CellEditType, CellKind, IOutputDto, IOutputItemDto } from 'vs/workbench/contrib/notebook/common/notebookCommon';
-import { INotebookService } from 'vs/workbench/contrib/notebook/common/notebookService';
-import { setupInstantiationService, valueBytesFromString, withTestNotebook } from 'vs/workbench/contrib/notebook/test/browser/testNotebookEditor';
+import assert from 'assert';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { CellOutputContainer } from '../../browser/view/cellParts/cellOutput.js';
+import { CodeCellRenderTemplate } from '../../browser/view/notebookRenderingCommon.js';
+import { CodeCellViewModel } from '../../browser/viewModel/codeCellViewModel.js';
+import { CellKind, INotebookRendererInfo, IOutputDto } from '../../common/notebookCommon.js';
+import { setupInstantiationService, withTestNotebook } from './testNotebookEditor.js';
+import { FastDomNode } from '../../../../../base/browser/fastDomNode.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { INotebookService } from '../../common/notebookService.js';
+import { mock } from '../../../../../base/test/common/mock.js';
+import { IMenu, IMenuService } from '../../../../../platform/actions/common/actions.js';
+import { Event } from '../../../../../base/common/event.js';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { getAllOutputsText } from '../../browser/viewModel/cellOutputTextHelper.js';
 
-OutputRendererRegistry.registerOutputTransform(class implements IOutputTransformContribution {
-	getType() { return RenderOutputType.Mainframe; }
-
-	getMimetypes() {
-		return ['application/vnd.code.notebook.stdout', 'application/x.notebook.stdout', 'application/x.notebook.stream'];
-	}
-
-	constructor() { }
-
-	render(output: ICellOutputViewModel, item: IOutputItemDto, container: HTMLElement): IRenderOutput {
-		const text = getStringValue(item);
-		const contentNode = DOM.$('span.output-stream');
-		contentNode.textContent = text;
-		container.appendChild(contentNode);
-		return { type: RenderOutputType.Mainframe };
-	}
-
-	dispose() { }
-});
-
-suite('NotebookViewModel Outputs', async () => {
-
-	let disposables: DisposableStore;
+suite('CellOutput', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
 	let instantiationService: TestInstantiationService;
-	let openerService: IOpenerService;
+	let outputMenus: IMenu[] = [];
 
-	suiteSetup(() => {
-		disposables = new DisposableStore();
-		instantiationService = setupInstantiationService(disposables);
+	setup(() => {
+		outputMenus = [];
+		instantiationService = setupInstantiationService(store);
 		instantiationService.stub(INotebookService, new class extends mock<INotebookService>() {
-			override getOutputMimeTypeInfo(textModel: NotebookTextModel, kernelProvides: [], output: IOutputDto) {
-				if (output.outputId === 'output_id_err') {
-					return [{
-						mimeType: 'application/vnd.code.notebook.stderr',
-						rendererId: BUILTIN_RENDERER_ID,
-						isTrusted: true
-					}];
-				}
+			override getOutputMimeTypeInfo(_textModel: any, _kernelProvides: readonly string[] | undefined, output: IOutputDto) {
 				return [{
-					mimeType: 'application/vnd.code.notebook.stdout',
-					rendererId: BUILTIN_RENDERER_ID,
+					rendererId: 'plainTextRendererId',
+					mimeType: 'text/plain',
 					isTrusted: true
-				}];
+				}, {
+					rendererId: 'htmlRendererId',
+					mimeType: 'text/html',
+					isTrusted: true
+				}, {
+					rendererId: 'errorRendererId',
+					mimeType: 'application/vnd.code.notebook.error',
+					isTrusted: true
+				}, {
+					rendererId: 'stderrRendererId',
+					mimeType: 'application/vnd.code.notebook.stderr',
+					isTrusted: true
+				}, {
+					rendererId: 'stdoutRendererId',
+					mimeType: 'application/vnd.code.notebook.stdout',
+					isTrusted: true
+				}]
+					.filter(info => output.outputs.some(output => output.mime === info.mimeType));
 			}
-		});
-
-		instantiationService.stub(IMenuService, new class extends mock<IMenuService>() {
-			override createMenu(arg: any, context: any): any {
+			override getRendererInfo(): INotebookRendererInfo {
 				return {
-					onDidChange: () => { },
-					getActions: (arg: any) => {
-						return [];
-					}
+					id: 'rendererId',
+					displayName: 'Stubbed Renderer',
+					extensionId: { _lower: 'id', value: 'id' },
+				} as INotebookRendererInfo;
+			}
+		});
+		instantiationService.stub(IMenuService, new class extends mock<IMenuService>() {
+			override createMenu() {
+				const menu = new class extends mock<IMenu>() {
+					override onDidChange = Event.None;
+					override getActions() { return []; }
+					override dispose() { outputMenus = outputMenus.filter(item => item !== menu); }
 				};
+				outputMenus.push(menu);
+				return menu;
 			}
 		});
-
-		instantiationService.stub(IKeybindingService, new class extends mock<IKeybindingService>() {
-			override lookupKeybinding(arg: any): any {
-				return null;
-			}
-		});
-
-		openerService = instantiationService.stub(IOpenerService, {});
 	});
 
-	suiteTeardown(() => disposables.dispose());
+	test('Render cell output items with multiple mime types', async function () {
+		const outputItem = { data: VSBuffer.fromString('output content'), mime: 'text/plain' };
+		const htmlOutputItem = { data: VSBuffer.fromString('output content'), mime: 'text/html' };
+		const output1: IOutputDto = { outputId: 'abc', outputs: [outputItem, htmlOutputItem] };
+		const output2: IOutputDto = { outputId: 'def', outputs: [outputItem, htmlOutputItem] };
 
-	test('stream outputs reuse output container', async () => {
 		await withTestNotebook(
 			[
-				['var a = 1;', 'javascript', CellKind.Code, [
-					{ outputId: 'output_id_1', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('1') }] },
-					{ outputId: 'output_id_2', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('2') }] },
-					{ outputId: 'output_id_err', outputs: [{ mime: 'application/vnd.code.notebook.stderr', data: valueBytesFromString('1000') }] },
-					{ outputId: 'output_id_3', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('3') }] },
-				], {}]
+				['print(output content)', 'python', CellKind.Code, [output1, output2], {}],
 			],
-			(editor, viewModel, accessor) => {
-				const container = new CellOutputContainer(editor, viewModel.viewCells[0] as CodeCellViewModel, {
-					outputContainer: new FastDomNode(document.createElement('div')),
-					outputShowMoreContainer: new FastDomNode(document.createElement('div')),
-					editor: {
-						getContentHeight: () => {
-							return 100;
-						}
-					},
-					templateDisposables: new DisposableStore(),
-				} as unknown as CodeCellRenderTemplate, { limit: 5 }, openerService, instantiationService);
-				container.render(100);
-				assert.strictEqual(container.renderedOutputEntries.length, 4);
-				assert.strictEqual(container.renderedOutputEntries[0].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[1].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[2].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[3].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer, container.renderedOutputEntries[1].element.innerContainer);
-				assert.notStrictEqual(container.renderedOutputEntries[1].element.innerContainer, container.renderedOutputEntries[2].element.innerContainer);
-				assert.notStrictEqual(container.renderedOutputEntries[2].element.innerContainer, container.renderedOutputEntries[3].element.innerContainer);
+			(editor, viewModel, disposables, accessor) => {
 
-				editor.textModel.applyEdits([{
-					index: 0,
-					editType: CellEditType.Output,
-					outputs: [
-						{
-							outputId: 'output_id_4',
-							outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('4') }]
-						},
-						{
-							outputId: 'output_id_5',
-							outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('5') }]
-						}
-					],
-					append: true
-				}], true, undefined, () => undefined, undefined);
-				assert.strictEqual(container.renderedOutputEntries.length, 5);
-				// last one is merged with previous one
-				assert.strictEqual(container.renderedOutputEntries[3].element.innerContainer, container.renderedOutputEntries[4].element.innerContainer);
-
-				editor.textModel.applyEdits([{
-					index: 0,
-					editType: CellEditType.Output,
-					outputs: [
-						{ outputId: 'output_id_1', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('1') }] },
-						{ outputId: 'output_id_2', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('2') }] },
-						{ outputId: 'output_id_err', outputs: [{ mime: 'application/vnd.code.notebook.stderr', data: valueBytesFromString('1000') }] },
-						{
-							outputId: 'output_id_5',
-							outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('5') }]
-						}
-					],
-				}], true, undefined, () => undefined, undefined);
-				assert.strictEqual(container.renderedOutputEntries.length, 4);
-				assert.strictEqual(container.renderedOutputEntries[0].model.model.outputId, 'output_id_1');
-				assert.strictEqual(container.renderedOutputEntries[0].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[1].model.model.outputId, 'output_id_2');
-				assert.strictEqual(container.renderedOutputEntries[1].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[2].model.model.outputId, 'output_id_err');
-				assert.strictEqual(container.renderedOutputEntries[2].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[3].model.model.outputId, 'output_id_5');
-				assert.strictEqual(container.renderedOutputEntries[3].element.useDedicatedDOM, true);
+				const cell = viewModel.viewCells[0] as CodeCellViewModel;
+				const cellTemplate = createCellTemplate(disposables);
+				const output = disposables.add(accessor.createInstance(CellOutputContainer, editor, cell, cellTemplate, { limit: 100 }));
+				output.render();
+				cell.outputsViewModels[0].setVisible(true);
+				assert.strictEqual(outputMenus.length, 1, 'should have 1 output menus');
+				assert(cellTemplate.outputContainer.domNode.style.display !== 'none', 'output container should be visible');
+				cell.outputsViewModels[1].setVisible(true);
+				assert.strictEqual(outputMenus.length, 2, 'should have 2 output menus');
+				cell.outputsViewModels[1].setVisible(true);
+				assert.strictEqual(outputMenus.length, 2, 'should still have 2 output menus');
 			},
 			instantiationService
 		);
 	});
 
-	test('stream outputs reuse output container 2', async () => {
+	test('One of many cell outputs becomes hidden', async function () {
+		const outputItem = { data: VSBuffer.fromString('output content'), mime: 'text/plain' };
+		const htmlOutputItem = { data: VSBuffer.fromString('output content'), mime: 'text/html' };
+		const output1: IOutputDto = { outputId: 'abc', outputs: [outputItem, htmlOutputItem] };
+		const output2: IOutputDto = { outputId: 'def', outputs: [outputItem, htmlOutputItem] };
+		const output3: IOutputDto = { outputId: 'ghi', outputs: [outputItem, htmlOutputItem] };
+
 		await withTestNotebook(
 			[
-				['var a = 1;', 'javascript', CellKind.Code, [
-					{ outputId: 'output_id_1', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('1') }] },
-					{ outputId: 'output_id_2', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('2') }] },
-					{ outputId: 'output_id_err', outputs: [{ mime: 'application/vnd.code.notebook.stderr', data: valueBytesFromString('1000') }] },
-					{ outputId: 'output_id_4', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('4') }] },
-					{ outputId: 'output_id_5', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('5') }] },
-					{ outputId: 'output_id_6', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('6') }] },
-				], {}]
+				['print(output content)', 'python', CellKind.Code, [output1, output2, output3], {}],
 			],
-			(editor, viewModel, accessor) => {
-				const container = new CellOutputContainer(editor, viewModel.viewCells[0] as CodeCellViewModel, {
-					outputContainer: new FastDomNode(document.createElement('div')),
-					outputShowMoreContainer: new FastDomNode(document.createElement('div')),
-					editor: {
-						getContentHeight: () => {
-							return 100;
-						}
-					},
-					templateDisposables: new DisposableStore(),
-				} as unknown as CodeCellRenderTemplate, { limit: 5 }, openerService, instantiationService);
-				container.render(100);
-				assert.strictEqual(container.renderedOutputEntries.length, 5);
-				assert.strictEqual(container.renderedOutputEntries[0].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[1].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer?.innerText, '12');
+			(editor, viewModel, disposables, accessor) => {
 
-				assert.strictEqual(container.renderedOutputEntries[2].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[2].element.innerContainer?.innerText, '1000');
-
-				assert.strictEqual(container.renderedOutputEntries[3].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[4].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[3].element.innerContainer?.innerText, '45');
-
-
-				editor.textModel.applyEdits([{
-					index: 0,
-					editType: CellEditType.Output,
-					outputs: [
-						{ outputId: 'output_id_1', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('1') }] },
-						{ outputId: 'output_id_2', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('2') }] },
-						{ outputId: 'output_id_7', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('7') }] },
-						{ outputId: 'output_id_5', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('5') }] },
-						{ outputId: 'output_id_6', outputs: [{ mime: 'application/vnd.code.notebook.stdout', data: valueBytesFromString('6') }] },
-
-					]
-				}], true, undefined, () => undefined, undefined);
-				assert.strictEqual(container.renderedOutputEntries.length, 5);
-				assert.strictEqual(container.renderedOutputEntries[0].model.model.outputId, 'output_id_1');
-				assert.strictEqual(container.renderedOutputEntries[1].model.model.outputId, 'output_id_2');
-				assert.strictEqual(container.renderedOutputEntries[2].model.model.outputId, 'output_id_7');
-				assert.strictEqual(container.renderedOutputEntries[3].model.model.outputId, 'output_id_5');
-				assert.strictEqual(container.renderedOutputEntries[4].model.model.outputId, 'output_id_6');
-
-				assert.strictEqual(container.renderedOutputEntries[0].element.useDedicatedDOM, true);
-				assert.strictEqual(container.renderedOutputEntries[1].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[2].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[3].element.useDedicatedDOM, false);
-				assert.strictEqual(container.renderedOutputEntries[4].element.useDedicatedDOM, false);
-
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer, container.renderedOutputEntries[1].element.innerContainer);
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer, container.renderedOutputEntries[2].element.innerContainer);
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer, container.renderedOutputEntries[3].element.innerContainer);
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer, container.renderedOutputEntries[4].element.innerContainer);
-
-				assert.strictEqual(container.renderedOutputEntries[0].element.innerContainer?.innerText, '12756');
+				const cell = viewModel.viewCells[0] as CodeCellViewModel;
+				const cellTemplate = createCellTemplate(disposables);
+				const output = disposables.add(accessor.createInstance(CellOutputContainer, editor, cell, cellTemplate, { limit: 100 }));
+				output.render();
+				cell.outputsViewModels[0].setVisible(true);
+				cell.outputsViewModels[1].setVisible(true);
+				cell.outputsViewModels[2].setVisible(true);
+				cell.outputsViewModels[1].setVisible(false);
+				assert(cellTemplate.outputContainer.domNode.style.display !== 'none', 'output container should be visible');
+				assert.strictEqual(outputMenus.length, 2, 'should have 2 output menus');
 			},
 			instantiationService
 		);
 	});
+
+	test('get all adjacent stream outputs', async () => {
+		const stdout = { data: VSBuffer.fromString('stdout'), mime: 'application/vnd.code.notebook.stdout' };
+		const stderr = { data: VSBuffer.fromString('stderr'), mime: 'application/vnd.code.notebook.stderr' };
+		const output1: IOutputDto = { outputId: 'abc', outputs: [stdout] };
+		const output2: IOutputDto = { outputId: 'abc', outputs: [stderr] };
+
+		await withTestNotebook(
+			[
+				['print(output content)', 'python', CellKind.Code, [output1, output2], {}],
+			],
+			(_editor, viewModel) => {
+				const cell = viewModel.viewCells[0];
+				const notebook = viewModel.notebookDocument;
+				const result = getAllOutputsText(notebook, cell);
+
+				assert.strictEqual(result, 'stdoutstderr');
+			},
+			instantiationService
+		);
+	});
+
+	test('get all mixed outputs of cell', async () => {
+		const stdout = { data: VSBuffer.fromString('stdout'), mime: 'application/vnd.code.notebook.stdout' };
+		const stderr = { data: VSBuffer.fromString('stderr'), mime: 'application/vnd.code.notebook.stderr' };
+		const plainText = { data: VSBuffer.fromString('output content'), mime: 'text/plain' };
+		const error = { data: VSBuffer.fromString(`{"name":"Error Name","message":"error message","stack":"error stack"}`), mime: 'application/vnd.code.notebook.error' };
+		const output1: IOutputDto = { outputId: 'abc', outputs: [stdout] };
+		const output2: IOutputDto = { outputId: 'abc', outputs: [stderr] };
+		const output3: IOutputDto = { outputId: 'abc', outputs: [plainText] };
+		const output4: IOutputDto = { outputId: 'abc', outputs: [error] };
+
+		await withTestNotebook(
+			[
+				['print(output content)', 'python', CellKind.Code, [output1, output2, output3, output4], {}],
+			],
+			(_editor, viewModel) => {
+				const cell = viewModel.viewCells[0];
+				const notebook = viewModel.notebookDocument;
+				const result = getAllOutputsText(notebook, cell);
+
+				assert.strictEqual(result,
+					'Cell output 1 of 3\n' +
+					'stdoutstderr\n' +
+					'Cell output 2 of 3\n' +
+					'output content\n' +
+					'Cell output 3 of 3\n' +
+					'error stack'
+				);
+			},
+			instantiationService
+		);
+
+	});
+
 
 });
+
+function createCellTemplate(disposables: DisposableStore) {
+	return {
+		outputContainer: new FastDomNode(document.createElement('div')),
+		outputShowMoreContainer: new FastDomNode(document.createElement('div')),
+		focusSinkElement: document.createElement('div'),
+		templateDisposables: disposables,
+		elementDisposables: disposables,
+	} as unknown as CodeCellRenderTemplate;
+}

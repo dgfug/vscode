@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBuffer } from 'vs/base/common/buffer';
-import * as platform from 'vs/base/common/platform';
+import { VSBuffer } from '../../../base/common/buffer.js';
+import * as platform from '../../../base/common/platform.js';
 
 export interface IFullSemanticTokensDto {
 	id: number;
@@ -15,7 +15,7 @@ export interface IFullSemanticTokensDto {
 export interface IDeltaSemanticTokensDto {
 	id: number;
 	type: 'delta';
-	deltas: { start: number; deleteCount: number; data?: Uint32Array; }[];
+	deltas: { start: number; deleteCount: number; data?: Uint32Array }[];
 }
 
 export type ISemanticTokensDto = IFullSemanticTokensDto | IDeltaSemanticTokensDto;
@@ -133,7 +133,7 @@ export function decodeSemanticTokensDto(_buff: VSBuffer): ISemanticTokensDto {
 		};
 	}
 	const deltaCount = src[offset++];
-	const deltas: { start: number; deleteCount: number; data?: Uint32Array; }[] = [];
+	const deltas: { start: number; deleteCount: number; data?: Uint32Array }[] = [];
 	for (let i = 0; i < deltaCount; i++) {
 		const start = src[offset++];
 		const deleteCount = src[offset++];

@@ -63,9 +63,14 @@ export class GitFileSystemProvider implements FileSystemProvider {
 			return;
 		}
 
-		const gitUri = toGitUri(uri, '', { replaceFileExtension: true });
+		const diffOriginalResourceUri = toGitUri(uri, '~',);
+		const quickDiffOriginalResourceUri = toGitUri(uri, '', { replaceFileExtension: true });
+
 		this.mtime = new Date().getTime();
-		this._onDidChangeFile.fire([{ type: FileChangeType.Changed, uri: gitUri }]);
+		this._onDidChangeFile.fire([
+			{ type: FileChangeType.Changed, uri: diffOriginalResourceUri },
+			{ type: FileChangeType.Changed, uri: quickDiffOriginalResourceUri }
+		]);
 	}
 
 	@debounce(1100)
@@ -187,7 +192,9 @@ export class GitFileSystemProvider implements FileSystemProvider {
 		try {
 			return await repository.buffer(sanitizeRef(ref, path, repository), path);
 		} catch (err) {
-			return new Uint8Array(0);
+			// File does not exist in git. This could be
+			// because the file is untracked or ignored
+			throw FileSystemError.FileNotFound();
 		}
 	}
 

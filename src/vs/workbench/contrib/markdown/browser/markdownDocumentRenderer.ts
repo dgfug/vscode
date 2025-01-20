@@ -3,12 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as dompurify from 'vs/base/browser/dompurify/dompurify';
-import * as marked from 'vs/base/common/marked/marked';
-import { Schemas } from 'vs/base/common/network';
-import { tokenizeToString } from 'vs/editor/common/languages/textToHtmlTokenizer';
-import { ILanguageService } from 'vs/editor/common/services/language';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
+import { basicMarkupHtmlTags, hookDomPurifyHrefAndSrcSanitizer } from '../../../../base/browser/dom.js';
+import dompurify from '../../../../base/browser/dompurify/dompurify.js';
+import { allowedMarkdownAttr } from '../../../../base/browser/markdownRenderer.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import * as marked from '../../../../base/common/marked/marked.js';
+import { Schemas } from '../../../../base/common/network.js';
+import { escape } from '../../../../base/common/strings.js';
+import { ILanguageService } from '../../../../editor/common/languages/language.js';
+import { tokenizeToString } from '../../../../editor/common/languages/textToHtmlTokenizer.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+import { markedGfmHeadingIdPlugin } from './markedGfmHeadingIdPlugin.js';
 
 export const DEFAULT_MARKDOWN_STYLES = `
 body {
@@ -28,7 +33,7 @@ img {
 }
 
 a {
-	text-decoration: none;
+	text-decoration: var(--text-link-decoration);
 }
 
 a:hover {
@@ -64,15 +69,13 @@ table {
 	border-collapse: collapse;
 }
 
-table > thead > tr > th {
+th {
 	text-align: left;
 	border-bottom: 1px solid;
 }
 
-table > thead > tr > th,
-table > thead > tr > td,
-table > tbody > tr > th,
-table > tbody > tr > td {
+th,
+td {
 	padding: 5px 10px;
 }
 
@@ -92,17 +95,19 @@ code {
 	font-family: "SF Mono", Monaco, Menlo, Consolas, "Ubuntu Mono", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace;
 }
 
+pre {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
 pre code {
 	font-family: var(--vscode-editor-font-family);
 	font-weight: var(--vscode-editor-font-weight);
 	font-size: var(--vscode-editor-font-size);
 	line-height: 1.5;
-}
-
-code > div {
-	padding: 16px;
-	border-radius: 3px;
-	overflow: auto;
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
 }
 
 .monaco-tokenized-source {
@@ -111,83 +116,79 @@ code > div {
 
 /** Theming */
 
-.vscode-light code > div {
-	background-color: rgba(220, 220, 220, 0.4);
-}
-
-.vscode-dark code > div {
-	background-color: rgba(10, 10, 10, 0.4);
-}
-
-.vscode-high-contrast code > div {
-	background-color: rgb(0, 0, 0);
+.pre {
+	background-color: var(--vscode-textCodeBlock-background);
 }
 
 .vscode-high-contrast h1 {
 	border-color: rgb(0, 0, 0);
 }
 
-.vscode-light table > thead > tr > th {
+.vscode-light th {
 	border-color: rgba(0, 0, 0, 0.69);
 }
 
-.vscode-dark table > thead > tr > th {
+.vscode-dark th {
 	border-color: rgba(255, 255, 255, 0.69);
 }
 
 .vscode-light h1,
 .vscode-light hr,
-.vscode-light table > tbody > tr + tr > td {
+.vscode-light td {
 	border-color: rgba(0, 0, 0, 0.18);
 }
 
 .vscode-dark h1,
 .vscode-dark hr,
-.vscode-dark table > tbody > tr + tr > td {
+.vscode-dark td {
 	border-color: rgba(255, 255, 255, 0.18);
 }
 
+@media (forced-colors: active) and (prefers-color-scheme: light){
+	body {
+		forced-color-adjust: none;
+	}
+}
+
+@media (forced-colors: active) and (prefers-color-scheme: dark){
+	body {
+		forced-color-adjust: none;
+	}
+}
 `;
 
 const allowedProtocols = [Schemas.http, Schemas.https, Schemas.command];
 function sanitize(documentContent: string, allowUnknownProtocols: boolean): string {
 
-	// https://github.com/cure53/DOMPurify/blob/main/demos/hooks-scheme-allowlist.html
-	dompurify.addHook('afterSanitizeAttributes', (node) => {
-		// build an anchor to map URLs to
-		const anchor = document.createElement('a');
-
-		// check all href/src attributes for validity
-		for (const attr in ['href', 'src']) {
-			if (node.hasAttribute(attr)) {
-				anchor.href = node.getAttribute(attr) as string;
-				if (!allowedProtocols.includes(anchor.protocol)) {
-					node.removeAttribute(attr);
-				}
-			}
-		}
-	});
+	const hook = hookDomPurifyHrefAndSrcSanitizer(allowedProtocols, true);
 
 	try {
 		return dompurify.sanitize(documentContent, {
 			...{
 				ALLOWED_TAGS: [
-					'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'br', 'b', 'i', 'strong', 'em', 'a', 'pre', 'code', 'img', 'tt',
-					'div', 'ins', 'del', 'sup', 'sub', 'p', 'ol', 'ul', 'table', 'thead', 'tbody', 'tfoot', 'blockquote', 'dl', 'dt',
-					'dd', 'kbd', 'q', 'samp', 'var', 'hr', 'ruby', 'rt', 'rp', 'li', 'tr', 'td', 'th', 's', 'strike', 'summary', 'details',
-					'caption', 'figure', 'figcaption', 'abbr', 'bdo', 'cite', 'dfn', 'mark', 'small', 'span', 'time', 'wbr', 'checkbox', 'checklist', 'vertically-centered'
+					...basicMarkupHtmlTags,
+					'checkbox',
+					'checklist',
 				],
 				ALLOWED_ATTR: [
-					'href', 'data-href', 'data-command', 'target', 'title', 'name', 'src', 'alt', 'class', 'id', 'role', 'tabindex', 'style', 'data-code',
-					'width', 'height', 'align', 'x-dispatch',
+					...allowedMarkdownAttr,
+					'data-command', 'name', 'id', 'role', 'tabindex',
+					'x-dispatch',
 					'required', 'checked', 'placeholder', 'when-checked', 'checked-on',
 				],
 			},
 			...(allowUnknownProtocols ? { ALLOW_UNKNOWN_PROTOCOLS: true } : {}),
 		});
 	} finally {
-		dompurify.removeHook('afterSanitizeAttributes');
+		hook.dispose();
 	}
+}
+
+interface IRenderMarkdownDocumentOptions {
+	readonly shouldSanitize?: boolean;
+	readonly allowUnknownProtocols?: boolean;
+	readonly markedExtensions?: marked.MarkedExtension[];
+	readonly token?: CancellationToken;
 }
 
 /**
@@ -199,29 +200,113 @@ export async function renderMarkdownDocument(
 	text: string,
 	extensionService: IExtensionService,
 	languageService: ILanguageService,
-	shouldSanitize: boolean = true,
-	allowUnknownProtocols: boolean = false,
+	options?: IRenderMarkdownDocumentOptions
 ): Promise<string> {
+	const m = new marked.Marked(
+		MarkedHighlight.markedHighlight({
+			async: true,
+			async highlight(code: string, lang: string): Promise<string> {
+				if (typeof lang !== 'string') {
+					return escape(code);
+				}
 
-	const highlight = (code: string, lang: string, callback: ((error: any, code: string) => void) | undefined): any => {
-		if (!callback) {
-			return code;
+				await extensionService.whenInstalledExtensionsRegistered();
+				if (options?.token?.isCancellationRequested) {
+					return '';
+				}
+
+				const languageId = languageService.getLanguageIdByLanguageName(lang) ?? languageService.getLanguageIdByLanguageName(lang.split(/\s+|:|,|(?!^)\{|\?]/, 1)[0]);
+				return tokenizeToString(languageService, code, languageId);
+			}
+		}),
+		markedGfmHeadingIdPlugin(),
+		...(options?.markedExtensions ?? []),
+	);
+
+	const raw = await m.parse(text, { async: true });
+	if (options?.shouldSanitize ?? true) {
+		return sanitize(raw, options?.allowUnknownProtocols ?? false);
+	} else {
+		return raw;
+	}
+}
+
+namespace MarkedHighlight {
+	// Copied from https://github.com/markedjs/marked-highlight/blob/main/src/index.js
+
+	export function markedHighlight(options: marked.MarkedOptions & { highlight: (code: string, lang: string) => string | Promise<string> }): marked.MarkedExtension {
+		if (typeof options === 'function') {
+			options = {
+				highlight: options,
+			};
 		}
-		extensionService.whenInstalledExtensionsRegistered().then(async () => {
-			const languageId = languageService.getLanguageIdByLanguageName(lang);
-			const html = await tokenizeToString(languageService, code, languageId);
-			callback(null, `<code>${html}</code>`);
-		});
-		return '';
+
+		if (!options || typeof options.highlight !== 'function') {
+			throw new Error('Must provide highlight function');
+		}
+
+		return {
+			async: !!options.async,
+			walkTokens(token: marked.Token): Promise<void> | void {
+				if (token.type !== 'code') {
+					return;
+				}
+
+				if (options.async) {
+					return Promise.resolve(options.highlight(token.text, token.lang)).then(updateToken(token));
+				}
+
+				const code = options.highlight(token.text, token.lang);
+				if (code instanceof Promise) {
+					throw new Error('markedHighlight is not set to async but the highlight function is async. Set the async option to true on markedHighlight to await the async highlight function.');
+				}
+				updateToken(token)(code);
+			},
+			renderer: {
+				code({ text, lang, escaped }: marked.Tokens.Code) {
+					const classAttr = lang
+						? ` class="language-${escape(lang)}"`
+						: '';
+					text = text.replace(/\n$/, '');
+					return `<pre><code${classAttr}>${escaped ? text : escape(text, true)}\n</code></pre>`;
+				},
+			},
+		};
+	}
+
+	function updateToken(token: any) {
+		return (code: string) => {
+			if (typeof code === 'string' && code !== token.text) {
+				token.escaped = true;
+				token.text = code;
+			}
+		};
+	}
+
+	// copied from marked helpers
+	const escapeTest = /[&<>"']/;
+	const escapeReplace = new RegExp(escapeTest.source, 'g');
+	const escapeTestNoEncode = /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/;
+	const escapeReplaceNoEncode = new RegExp(escapeTestNoEncode.source, 'g');
+	const escapeReplacement: Record<string, string> = {
+		'&': '&amp;',
+		'<': '&lt;',
+		'>': '&gt;',
+		'"': '&quot;',
+		[`'`]: '&#39;',
 	};
-
-	return new Promise<string>((resolve, reject) => {
-		marked(text, { highlight }, (err, value) => err ? reject(err) : resolve(value));
-	}).then(raw => {
-		if (shouldSanitize) {
-			return sanitize(raw, allowUnknownProtocols);
+	const getEscapeReplacement = (ch: string) => escapeReplacement[ch];
+	function escape(html: string, encode?: boolean) {
+		if (encode) {
+			if (escapeTest.test(html)) {
+				return html.replace(escapeReplace, getEscapeReplacement);
+			}
 		} else {
-			return raw;
+			if (escapeTestNoEncode.test(html)) {
+				return html.replace(escapeReplaceNoEncode, getEscapeReplacement);
+			}
 		}
-	});
+
+		return html;
+	}
 }

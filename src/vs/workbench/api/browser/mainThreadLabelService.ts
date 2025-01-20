@@ -3,34 +3,31 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { MainContext, MainThreadLabelServiceShape, IExtHostContext } from 'vs/workbench/api/common/extHost.protocol';
-import { extHostNamedCustomer } from 'vs/workbench/api/common/extHostCustomers';
-import { ResourceLabelFormatter, ILabelService } from 'vs/platform/label/common/label';
-import { IDisposable, dispose } from 'vs/base/common/lifecycle';
+import { Disposable, DisposableMap } from '../../../base/common/lifecycle.js';
+import { ILabelService, ResourceLabelFormatter } from '../../../platform/label/common/label.js';
+import { MainContext, MainThreadLabelServiceShape } from '../common/extHost.protocol.js';
+import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
 
 @extHostNamedCustomer(MainContext.MainThreadLabelService)
-export class MainThreadLabelService implements MainThreadLabelServiceShape {
+export class MainThreadLabelService extends Disposable implements MainThreadLabelServiceShape {
 
-	private readonly _resourceLabelFormatters = new Map<number, IDisposable>();
+	private readonly _resourceLabelFormatters = this._register(new DisposableMap<number>());
 
 	constructor(
 		_: IExtHostContext,
 		@ILabelService private readonly _labelService: ILabelService
-	) { }
+	) {
+		super();
+	}
 
 	$registerResourceLabelFormatter(handle: number, formatter: ResourceLabelFormatter): void {
 		// Dynamicily registered formatters should have priority over those contributed via package.json
 		formatter.priority = true;
-		const disposable = this._labelService.registerFormatter(formatter);
+		const disposable = this._labelService.registerCachedFormatter(formatter);
 		this._resourceLabelFormatters.set(handle, disposable);
 	}
 
 	$unregisterResourceLabelFormatter(handle: number): void {
-		dispose(this._resourceLabelFormatters.get(handle));
-		this._resourceLabelFormatters.delete(handle);
-	}
-
-	dispose(): void {
-		// noop
+		this._resourceLabelFormatters.deleteAndDispose(handle);
 	}
 }

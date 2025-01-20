@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { TextDocument, Range, LineChange, Selection } from 'vscode';
+import { TextDocument, Range, LineChange, Selection, Uri, TextEditor, TextEditorDiffInformation } from 'vscode';
+import { fromGitUri, isGitUri } from './uri';
 
 export function applyLineChanges(original: TextDocument, modified: TextDocument, diffs: LineChange[]): string {
 	const result: string[] = [];
 	let currentLine = 0;
 
-	for (let diff of diffs) {
+	for (const diff of diffs) {
 		const isInsertion = diff.originalEndLineNumber === 0;
 		const isDeletion = diff.modifiedEndLineNumber === 0;
 
@@ -109,12 +110,28 @@ export function intersectDiffWithRange(textDocument: TextDocument, diff: LineCha
 	if (diff.modifiedEndLineNumber === 0) {
 		return diff;
 	} else {
-		return {
-			originalStartLineNumber: diff.originalStartLineNumber,
-			originalEndLineNumber: diff.originalEndLineNumber,
-			modifiedStartLineNumber: intersection.start.line + 1,
-			modifiedEndLineNumber: intersection.end.line + 1
-		};
+		const modifiedStartLineNumber = intersection.start.line + 1;
+		const modifiedEndLineNumber = intersection.end.line + 1;
+
+		// heuristic: same number of lines on both sides, let's assume line by line
+		if (diff.originalEndLineNumber - diff.originalStartLineNumber === diff.modifiedEndLineNumber - diff.modifiedStartLineNumber) {
+			const delta = modifiedStartLineNumber - diff.modifiedStartLineNumber;
+			const length = modifiedEndLineNumber - modifiedStartLineNumber;
+
+			return {
+				originalStartLineNumber: diff.originalStartLineNumber + delta,
+				originalEndLineNumber: diff.originalStartLineNumber + delta + length,
+				modifiedStartLineNumber,
+				modifiedEndLineNumber
+			};
+		} else {
+			return {
+				originalStartLineNumber: diff.originalStartLineNumber,
+				originalEndLineNumber: diff.originalEndLineNumber,
+				modifiedStartLineNumber,
+				modifiedEndLineNumber
+			};
+		}
 	}
 }
 
@@ -125,4 +142,62 @@ export function invertLineChange(diff: LineChange): LineChange {
 		originalStartLineNumber: diff.modifiedStartLineNumber,
 		originalEndLineNumber: diff.modifiedEndLineNumber
 	};
+}
+
+export function toLineChanges(diffInformation: TextEditorDiffInformation): LineChange[] {
+	return diffInformation.changes.map(x => {
+		let originalStartLineNumber: number;
+		let originalEndLineNumber: number;
+		let modifiedStartLineNumber: number;
+		let modifiedEndLineNumber: number;
+
+		if (x.original.startLineNumber === x.original.endLineNumberExclusive) {
+			// Insertion
+			originalStartLineNumber = x.original.startLineNumber - 1;
+			originalEndLineNumber = 0;
+		} else {
+			originalStartLineNumber = x.original.startLineNumber;
+			originalEndLineNumber = x.original.endLineNumberExclusive - 1;
+		}
+
+		if (x.modified.startLineNumber === x.modified.endLineNumberExclusive) {
+			// Deletion
+			modifiedStartLineNumber = x.modified.startLineNumber - 1;
+			modifiedEndLineNumber = 0;
+		} else {
+			modifiedStartLineNumber = x.modified.startLineNumber;
+			modifiedEndLineNumber = x.modified.endLineNumberExclusive - 1;
+		}
+
+		return {
+			originalStartLineNumber,
+			originalEndLineNumber,
+			modifiedStartLineNumber,
+			modifiedEndLineNumber
+		};
+	});
+}
+
+export function getWorkingTreeDiffInformation(textEditor: TextEditor): TextEditorDiffInformation | undefined {
+	// Working tree diff information. Diff Editor (Working Tree) -> Text Editor
+	return getDiffInformation(textEditor, '~') ?? getDiffInformation(textEditor, '');
+}
+
+export function getWorkingTreeAndIndexDiffInformation(textEditor: TextEditor): TextEditorDiffInformation | undefined {
+	return getDiffInformation(textEditor, 'HEAD');
+}
+
+function getDiffInformation(textEditor: TextEditor, ref: string): TextEditorDiffInformation | undefined {
+	return textEditor.diffInformation?.find(diff => diff.original && isGitUri(diff.original) && fromGitUri(diff.original).ref === ref);
+}
+
+export interface DiffEditorSelectionHunkToolbarContext {
+	mapping: unknown;
+	/**
+	 * The original text with the selected modified changes applied.
+	*/
+	originalWithModifiedChanges: string;
+
+	modifiedUri: Uri;
+	originalUri: Uri;
 }

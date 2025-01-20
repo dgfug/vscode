@@ -3,40 +3,42 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as DOM from 'vs/base/browser/dom';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { ICellViewModel } from 'vs/workbench/contrib/notebook/browser/notebookBrowser';
+import * as DOM from '../../../../../../base/browser/dom.js';
+import { ICellViewModel, INotebookEditorDelegate } from '../../notebookBrowser.js';
+import { CellContentPart } from '../cellPart.js';
 
-export class CellDecorations extends Disposable {
+export class CellDecorations extends CellContentPart {
 	constructor(
-		rootContainer: HTMLElement,
-		decorationContainer: HTMLElement,
-		element: ICellViewModel
+		readonly notebookEditor: INotebookEditorDelegate,
+		readonly rootContainer: HTMLElement,
+		readonly decorationContainer: HTMLElement,
 	) {
 		super();
+	}
 
+	override didRenderCell(element: ICellViewModel): void {
 		const removedClassNames: string[] = [];
-		rootContainer.classList.forEach(className => {
+		this.rootContainer.classList.forEach(className => {
 			if (/^nb\-.*$/.test(className)) {
 				removedClassNames.push(className);
 			}
 		});
 
 		removedClassNames.forEach(className => {
-			rootContainer.classList.remove(className);
+			this.rootContainer.classList.remove(className);
 		});
 
-		decorationContainer.innerText = '';
+		this.decorationContainer.innerText = '';
 
 		const generateCellTopDecorations = () => {
-			decorationContainer.innerText = '';
+			this.decorationContainer.innerText = '';
 
 			element.getCellDecorations().filter(options => options.topClassName !== undefined).forEach(options => {
-				decorationContainer.append(DOM.$(`.${options.topClassName!}`));
+				this.decorationContainer.append(DOM.$(`.${options.topClassName!}`));
 			});
 		};
 
-		this._register(element.onCellDecorationsChanged((e) => {
+		this.cellDisposables.add(element.onCellDecorationsChanged((e) => {
 			const modified = e.added.find(e => e.topClassName) || e.removed.find(e => e.topClassName);
 
 			if (modified) {
@@ -45,5 +47,47 @@ export class CellDecorations extends Disposable {
 		}));
 
 		generateCellTopDecorations();
+		this.registerDecorations();
+	}
+
+	private registerDecorations() {
+		if (!this.currentCell) {
+			return;
+		}
+
+		this.cellDisposables.add(this.currentCell.onCellDecorationsChanged((e) => {
+			e.added.forEach(options => {
+				if (options.className && this.currentCell) {
+					this.rootContainer.classList.add(options.className);
+					this.notebookEditor.deltaCellContainerClassNames(this.currentCell.id, [options.className], []);
+				}
+
+				if (options.outputClassName && this.currentCell) {
+					this.notebookEditor.deltaCellContainerClassNames(this.currentCell.id, [options.outputClassName], []);
+				}
+			});
+
+			e.removed.forEach(options => {
+				if (options.className && this.currentCell) {
+					this.rootContainer.classList.remove(options.className);
+					this.notebookEditor.deltaCellContainerClassNames(this.currentCell.id, [], [options.className]);
+				}
+
+				if (options.outputClassName && this.currentCell) {
+					this.notebookEditor.deltaCellContainerClassNames(this.currentCell.id, [], [options.outputClassName]);
+				}
+			});
+		}));
+
+		this.currentCell.getCellDecorations().forEach(options => {
+			if (options.className && this.currentCell) {
+				this.rootContainer.classList.add(options.className);
+				this.notebookEditor.deltaCellContainerClassNames(this.currentCell.id, [options.className], []);
+			}
+
+			if (options.outputClassName && this.currentCell) {
+				this.notebookEditor.deltaCellContainerClassNames(this.currentCell.id, [options.outputClassName], []);
+			}
+		});
 	}
 }

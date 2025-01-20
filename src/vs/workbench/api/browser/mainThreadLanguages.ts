@@ -3,17 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI, UriComponents } from 'vs/base/common/uri';
-import { ILanguageService } from 'vs/editor/common/services/language';
-import { IModelService } from 'vs/editor/common/services/model';
-import { MainThreadLanguagesShape, MainContext, IExtHostContext, ExtHostContext, ExtHostLanguagesShape } from '../common/extHost.protocol';
-import { extHostNamedCustomer } from 'vs/workbench/api/common/extHostCustomers';
-import { IPosition } from 'vs/editor/common/core/position';
-import { IRange, Range } from 'vs/editor/common/core/range';
-import { StandardTokenType } from 'vs/editor/common/languages';
-import { ITextModelService } from 'vs/editor/common/services/resolverService';
-import { ILanguageStatus, ILanguageStatusService } from 'vs/workbench/services/languageStatus/common/languageStatusService';
-import { DisposableStore, IDisposable } from 'vs/base/common/lifecycle';
+import { URI, UriComponents } from '../../../base/common/uri.js';
+import { ILanguageService } from '../../../editor/common/languages/language.js';
+import { IModelService } from '../../../editor/common/services/model.js';
+import { MainThreadLanguagesShape, MainContext, ExtHostContext, ExtHostLanguagesShape } from '../common/extHost.protocol.js';
+import { extHostNamedCustomer, IExtHostContext } from '../../services/extensions/common/extHostCustomers.js';
+import { IPosition } from '../../../editor/common/core/position.js';
+import { IRange, Range } from '../../../editor/common/core/range.js';
+import { StandardTokenType } from '../../../editor/common/encodedTokenAttributes.js';
+import { ITextModelService } from '../../../editor/common/services/resolverService.js';
+import { ILanguageStatus, ILanguageStatusService } from '../../services/languageStatus/common/languageStatusService.js';
+import { DisposableMap, DisposableStore } from '../../../base/common/lifecycle.js';
 
 @extHostNamedCustomer(MainContext.MainThreadLanguages)
 export class MainThreadLanguages implements MainThreadLanguagesShape {
@@ -21,7 +21,7 @@ export class MainThreadLanguages implements MainThreadLanguagesShape {
 	private readonly _disposables = new DisposableStore();
 	private readonly _proxy: ExtHostLanguagesShape;
 
-	private readonly _status = new Map<number, IDisposable>();
+	private readonly _status = new DisposableMap<number>();
 
 	constructor(
 		_extHostContext: IExtHostContext,
@@ -40,11 +40,7 @@ export class MainThreadLanguages implements MainThreadLanguagesShape {
 
 	dispose(): void {
 		this._disposables.dispose();
-
-		for (const status of this._status.values()) {
-			status.dispose();
-		}
-		this._status.clear();
+		this._status.dispose();
 	}
 
 	async $changeLanguage(resource: UriComponents, languageId: string): Promise<void> {
@@ -56,20 +52,20 @@ export class MainThreadLanguages implements MainThreadLanguagesShape {
 		const uri = URI.revive(resource);
 		const ref = await this._resolverService.createModelReference(uri);
 		try {
-			this._modelService.setMode(ref.object.textEditorModel, this._languageService.createById(languageId));
+			ref.object.textEditorModel.setLanguage(this._languageService.createById(languageId));
 		} finally {
 			ref.dispose();
 		}
 	}
 
-	async $tokensAtPosition(resource: UriComponents, position: IPosition): Promise<undefined | { type: StandardTokenType, range: IRange }> {
+	async $tokensAtPosition(resource: UriComponents, position: IPosition): Promise<undefined | { type: StandardTokenType; range: IRange }> {
 		const uri = URI.revive(resource);
 		const model = this._modelService.getModel(uri);
 		if (!model) {
 			return undefined;
 		}
-		model.tokenizeIfCheap(position.lineNumber);
-		const tokens = model.getLineTokens(position.lineNumber);
+		model.tokenization.tokenizeIfCheap(position.lineNumber);
+		const tokens = model.tokenization.getLineTokens(position.lineNumber);
 		const idx = tokens.findTokenIndexAtOffset(position.column - 1);
 		return {
 			type: tokens.getStandardTokenType(idx),

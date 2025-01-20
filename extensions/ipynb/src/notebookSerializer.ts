@@ -3,16 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { nbformat } from '@jupyterlab/coreutils';
-import * as detectIndent from 'detect-indent';
+import type * as nbformat from '@jupyterlab/nbformat';
+import detectIndent from 'detect-indent';
 import * as vscode from 'vscode';
-import { defaultNotebookFormat } from './constants';
 import { getPreferredLanguage, jupyterNotebookModelToNotebookData } from './deserializers';
-import { createJupyterCellFromNotebookCell, pruneCell, sortObjectPropertiesRecursively } from './serializers';
 import * as fnv from '@enonic/fnv-plus';
+import { serializeNotebookToString } from './serializers';
 
-export class NotebookSerializer implements vscode.NotebookSerializer {
-	constructor(readonly context: vscode.ExtensionContext) {
+export abstract class NotebookSerializerBase extends vscode.Disposable implements vscode.NotebookSerializer {
+	protected disposed: boolean = false;
+	constructor(protected readonly context: vscode.ExtensionContext) {
+		super(() => { });
+	}
+
+	override dispose() {
+		this.disposed = true;
+		super.dispose();
 	}
 
 	public async deserializeNotebook(content: Uint8Array, _token: vscode.CancellationToken): Promise<vscode.NotebookData> {
@@ -22,7 +28,7 @@ export class NotebookSerializer implements vscode.NotebookSerializer {
 		} catch {
 		}
 
-		let json = contents ? (JSON.parse(contents) as Partial<nbformat.INotebookContent>) : {};
+		let json = contents && /\S/.test(contents) ? (JSON.parse(contents) as Partial<nbformat.INotebookContent>) : {};
 
 		if (json.__webview_backup) {
 			const backupId = json.__webview_backup;
@@ -51,19 +57,12 @@ export class NotebookSerializer implements vscode.NotebookSerializer {
 		// Ensure we always have a blank cell.
 		if ((json.cells || []).length === 0) {
 			json.cells = [
-				{
-					cell_type: 'code',
-					execution_count: null,
-					metadata: {},
-					outputs: [],
-					source: ''
-				}
 			];
 		}
 
 		// For notebooks without metadata default the language in metadata to the preferred language.
 		if (!json.metadata || (!json.metadata.kernelspec && !json.metadata.language_info)) {
-			json.metadata = json.metadata || { orig_nbformat: defaultNotebookFormat.major };
+			json.metadata = json.metadata || {};
 			json.metadata.language_info = json.metadata.language_info || { name: preferredCellLanguage };
 		}
 
@@ -77,30 +76,13 @@ export class NotebookSerializer implements vscode.NotebookSerializer {
 		return data;
 	}
 
-	public serializeNotebook(data: vscode.NotebookData, _token: vscode.CancellationToken): Uint8Array {
-		return new TextEncoder().encode(this.serializeNotebookToString(data));
+	public async serializeNotebook(data: vscode.NotebookData, _token: vscode.CancellationToken): Promise<Uint8Array> {
+		if (this.disposed) {
+			return new Uint8Array(0);
+		}
+
+		const serialized = serializeNotebookToString(data);
+		return new TextEncoder().encode(serialized);
 	}
 
-	public serializeNotebookToString(data: vscode.NotebookData): string {
-		const notebookContent = getNotebookMetadata(data);
-
-		notebookContent.cells = data.cells
-			.map(cell => createJupyterCellFromNotebookCell(cell))
-			.map(pruneCell);
-
-		const indentAmount = data.metadata && 'indentAmount' in data.metadata && typeof data.metadata.indentAmount === 'string' ?
-			data.metadata.indentAmount :
-			' ';
-		// ipynb always ends with a trailing new line (we add this so that SCMs do not show unnecesary changes, resulting from a missing trailing new line).
-		return JSON.stringify(sortObjectPropertiesRecursively(notebookContent), undefined, indentAmount) + '\n';
-	}
-}
-
-export function getNotebookMetadata(document: vscode.NotebookDocument | vscode.NotebookData) {
-	const notebookContent: Partial<nbformat.INotebookContent> = document.metadata?.custom || {};
-	notebookContent.cells = notebookContent.cells || [];
-	notebookContent.nbformat = notebookContent.nbformat || 4;
-	notebookContent.nbformat_minor = notebookContent.nbformat_minor ?? 2;
-	notebookContent.metadata = notebookContent.metadata || { orig_nbformat: 4 };
-	return notebookContent;
 }

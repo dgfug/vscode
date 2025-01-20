@@ -4,10 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type * as vscode from 'vscode';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { ExtHostStorage } from 'vs/workbench/api/common/extHostStorage';
-import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
-import { DeferredPromise, RunOnceScheduler } from 'vs/base/common/async';
+import { IDisposable } from '../../../base/common/lifecycle.js';
+import { ExtHostStorage } from './extHostStorage.js';
+import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
+import { DeferredPromise, RunOnceScheduler } from '../../../base/common/async.js';
 
 export class ExtensionMemento implements vscode.Memento {
 
@@ -16,7 +16,7 @@ export class ExtensionMemento implements vscode.Memento {
 	protected readonly _storage: ExtHostStorage;
 
 	private readonly _init: Promise<ExtensionMemento>;
-	private _value?: { [n: string]: any; };
+	private _value?: { [n: string]: any };
 	private readonly _storageListener: IDisposable;
 
 	private _deferredPromises: Map<string, DeferredPromise<void>> = new Map();
@@ -76,9 +76,17 @@ export class ExtensionMemento implements vscode.Memento {
 	}
 
 	update(key: string, value: any): Promise<void> {
-		this._value![key] = value;
+		if (value !== null && typeof value === 'object') {
+			// Prevent the value from being as-is for until we have
+			// received the change event from the main side by emulating
+			// the treatment of values via JSON parsing and stringifying.
+			// (https://github.com/microsoft/vscode/issues/209479)
+			this._value![key] = JSON.parse(JSON.stringify(value));
+		} else {
+			this._value![key] = value;
+		}
 
-		let record = this._deferredPromises.get(key);
+		const record = this._deferredPromises.get(key);
 		if (record !== undefined) {
 			return record.p;
 		}

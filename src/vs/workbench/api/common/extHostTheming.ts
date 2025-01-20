@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ColorTheme, ColorThemeKind } from './extHostTypes';
-import { IExtHostRpcService } from 'vs/workbench/api/common/extHostRpcService';
-import { ExtHostThemingShape } from 'vs/workbench/api/common/extHost.protocol';
-import { Emitter, Event } from 'vs/base/common/event';
+import { ColorTheme, ColorThemeKind } from './extHostTypes.js';
+import { IExtHostRpcService } from './extHostRpcService.js';
+import { ExtHostThemingShape } from './extHost.protocol.js';
+import { Emitter, Event } from '../../../base/common/event.js';
 
 export class ExtHostTheming implements ExtHostThemingShape {
 
@@ -27,7 +27,14 @@ export class ExtHostTheming implements ExtHostThemingShape {
 	}
 
 	$onColorThemeChange(type: string): void {
-		let kind = type === 'light' ? ColorThemeKind.Light : type === 'dark' ? ColorThemeKind.Dark : ColorThemeKind.HighContrast;
+		let kind;
+		switch (type) {
+			case 'light': kind = ColorThemeKind.Light; break;
+			case 'hcDark': kind = ColorThemeKind.HighContrast; break;
+			case 'hcLight': kind = ColorThemeKind.HighContrastLight; break;
+			default:
+				kind = ColorThemeKind.Dark;
+		}
 		this._actual = new ColorTheme(kind);
 		this._onDidChangeActiveColorTheme.fire(this._actual);
 	}

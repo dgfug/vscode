@@ -3,32 +3,33 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as glob from 'vs/base/common/glob';
-import { UriComponents, URI } from 'vs/base/common/uri';
-import { IRequestHandler } from 'vs/base/common/worker/simpleWorker';
-import { ILocalFileSearchSimpleWorker, ILocalFileSearchSimpleWorkerHost, IWorkerFileSearchComplete, IWorkerTextSearchComplete } from 'vs/workbench/services/search/common/localFileSearchWorkerTypes';
-import { ICommonQueryProps, IFileMatch, IFileQueryProps, IFolderQuery, IPatternInfo, ITextQueryProps, } from 'vs/workbench/services/search/common/search';
-import * as extpath from 'vs/base/common/extpath';
-import * as paths from 'vs/base/common/path';
-import { CancellationToken, CancellationTokenSource } from 'vs/base/common/cancellation';
-import { getFileResults } from 'vs/workbench/services/search/common/getFileResults';
-import { IgnoreFile } from 'vs/workbench/services/search/common/ignoreFile';
-import { createRegExp } from 'vs/base/common/strings';
-import { Promises } from 'vs/base/common/async';
+import * as glob from '../../../../base/common/glob.js';
+import { UriComponents, URI } from '../../../../base/common/uri.js';
+import { IRequestHandler, IWorkerServer } from '../../../../base/common/worker/simpleWorker.js';
+import { ILocalFileSearchSimpleWorker, LocalFileSearchSimpleWorkerHost, IWorkerFileSearchComplete, IWorkerFileSystemDirectoryHandle, IWorkerFileSystemHandle, IWorkerTextSearchComplete } from '../common/localFileSearchWorkerTypes.js';
+import { ICommonQueryProps, IFileMatch, IFileQueryProps, IFolderQuery, IPatternInfo, ITextQueryProps, } from '../common/search.js';
+import * as paths from '../../../../base/common/path.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
+import { getFileResults } from '../common/getFileResults.js';
+import { IgnoreFile } from '../common/ignoreFile.js';
+import { createRegExp } from '../../../../base/common/strings.js';
+import { Promises } from '../../../../base/common/async.js';
+import { ExtUri } from '../../../../base/common/resources.js';
+import { revive } from '../../../../base/common/marshalling.js';
 
 const PERF = false;
 
 type FileNode = {
-	type: 'file',
-	name: string,
-	path: string,
-	resolve: () => Promise<ArrayBuffer>
+	type: 'file';
+	name: string;
+	path: string;
+	resolve: () => Promise<ArrayBuffer>;
 };
 
 type DirNode = {
-	type: 'dir',
-	name: string,
-	entries: Promise<(DirNode | FileNode)[]>
+	type: 'dir';
+	name: string;
+	entries: Promise<(DirNode | FileNode)[]>;
 };
 
 const globalStart = +new Date();
@@ -48,21 +49,24 @@ const time = async <T>(name: string, task: () => Promise<T> | T) => {
 };
 
 /**
- * Called on the worker side
- * @internal
+ * Defines the worker entry point. Must be exported and named `create`.
+ * @skipMangle
  */
-export function create(host: ILocalFileSearchSimpleWorkerHost): IRequestHandler {
-	return new LocalFileSearchSimpleWorker(host);
+export function create(workerServer: IWorkerServer): IRequestHandler {
+	return new LocalFileSearchSimpleWorker(workerServer);
 }
 
 export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker, IRequestHandler {
 	_requestHandlerBrand: any;
 
+	private readonly host: LocalFileSearchSimpleWorkerHost;
 	cancellationTokens: Map<number, CancellationTokenSource> = new Map();
 
-	constructor(private host: ILocalFileSearchSimpleWorkerHost) { }
+	constructor(workerServer: IWorkerServer) {
+		this.host = LocalFileSearchSimpleWorkerHost.getChannel(workerServer);
+	}
 
-	cancelQuery(queryId: number): void {
+	$cancelQuery(queryId: number): void {
 		this.cancellationTokens.get(queryId)?.cancel();
 	}
 
@@ -72,7 +76,10 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 		return source;
 	}
 
-	async listDirectory(handle: FileSystemDirectoryHandle, query: IFileQueryProps<UriComponents>, folderQuery: IFolderQuery<UriComponents>, queryId: number): Promise<IWorkerFileSearchComplete> {
+	async $listDirectory(handle: IWorkerFileSystemDirectoryHandle, query: IFileQueryProps<UriComponents>, folderQuery: IFolderQuery<UriComponents>, ignorePathCasing: boolean, queryId: number): Promise<IWorkerFileSearchComplete> {
+		const revivedFolderQuery = reviveFolderQuery(folderQuery);
+		const extUri = new ExtUri(() => ignorePathCasing);
+
 		const token = this.registerCancellationToken(queryId);
 		const entries: string[] = [];
 		let limitHit = false;
@@ -84,7 +91,7 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 			? (name: string) => query.filePattern!.split('').every(c => name.includes(c))
 			: (name: string) => true;
 
-		await time('listDirectory', () => this.walkFolderQuery(handle, query, folderQuery, file => {
+		await time('listDirectory', () => this.walkFolderQuery(handle, reviveQueryProps(query), revivedFolderQuery, extUri, file => {
 			if (!filePatternMatcher(file.name)) {
 				return;
 			}
@@ -104,7 +111,10 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 		};
 	}
 
-	async searchDirectory(handle: FileSystemDirectoryHandle, query: ITextQueryProps<UriComponents>, folderQuery: IFolderQuery<UriComponents>, queryId: number): Promise<IWorkerTextSearchComplete> {
+	async $searchDirectory(handle: IWorkerFileSystemDirectoryHandle, query: ITextQueryProps<UriComponents>, folderQuery: IFolderQuery<UriComponents>, ignorePathCasing: boolean, queryId: number): Promise<IWorkerTextSearchComplete> {
+		const revivedQuery = reviveFolderQuery(folderQuery);
+		const extUri = new ExtUri(() => ignorePathCasing);
+
 		return time('searchInFiles', async () => {
 			const token = this.registerCancellationToken(queryId);
 
@@ -116,7 +126,7 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 
 			let fileCount = 0;
 			let resultCount = 0;
-			let limitHit = false;
+			const limitHit = false;
 
 			const processFile = async (file: FileNode) => {
 				if (token.token.isCancellationRequested) {
@@ -132,8 +142,7 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 
 				const bytes = new Uint8Array(contents);
 				const fileResults = getFileResults(bytes, pattern, {
-					afterContext: query.afterContext ?? 0,
-					beforeContext: query.beforeContext ?? 0,
+					surroundingContext: query.surroundingContext ?? 0,
 					previewOptions: query.previewOptions,
 					remainingResultQuota: query.maxResults ? (query.maxResults - resultCount) : 10000,
 				});
@@ -144,16 +153,16 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 						token.cancel();
 					}
 					const match = {
-						resource: URI.joinPath(URI.revive(folderQuery.folder), file.path),
+						resource: URI.joinPath(revivedQuery.folder, file.path),
 						results: fileResults,
 					};
-					this.host.sendTextSearchMatch(match, queryId);
+					this.host.$sendTextSearchMatch(match, queryId);
 					results.push(match);
 				}
 			};
 
 			await time('walkFolderToResolve', () =>
-				this.walkFolderQuery(handle, query, folderQuery, async file => onGoingProcesses.push(processFile(file)), token.token)
+				this.walkFolderQuery(handle, reviveQueryProps(query), revivedQuery, extUri, async file => onGoingProcesses.push(processFile(file)), token.token)
 			);
 
 			await time('resolveOngoingProcesses', () => Promise.all(onGoingProcesses));
@@ -168,14 +177,20 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 
 	}
 
-	private async walkFolderQuery(handle: FileSystemDirectoryHandle, queryProps: ICommonQueryProps<UriComponents>, folderQuery: IFolderQuery<UriComponents>, onFile: (file: FileNode) => any, token: CancellationToken): Promise<void> {
+	private async walkFolderQuery(handle: IWorkerFileSystemDirectoryHandle, queryProps: ICommonQueryProps<URI>, folderQuery: IFolderQuery<URI>, extUri: ExtUri, onFile: (file: FileNode) => any, token: CancellationToken): Promise<void> {
 
-		const folderExcludes = glob.parse(folderQuery.excludePattern ?? {}, { trimForExclusions: true }) as glob.ParsedExpression;
+		const folderExcludes = folderQuery.excludePattern?.map(excludePattern => glob.parse(excludePattern.pattern ?? {}, { trimForExclusions: true }) as glob.ParsedExpression);
 
+		const evalFolderExcludes = (path: string, basename: string, hasSibling: (query: string) => boolean) => {
+			return folderExcludes?.some(folderExclude => {
+				return folderExclude(path, basename, hasSibling);
+			});
+
+		};
 		// For folders, only check if the folder is explicitly excluded so walking continues.
 		const isFolderExcluded = (path: string, basename: string, hasSibling: (query: string) => boolean) => {
 			path = path.slice(1);
-			if (folderExcludes(path, basename, hasSibling)) { return true; }
+			if (evalFolderExcludes(path, basename, hasSibling)) { return true; }
 			if (pathExcludedInQuery(queryProps, path)) { return true; }
 			return false;
 		};
@@ -183,12 +198,12 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 		// For files ensure the full check takes place.
 		const isFileIncluded = (path: string, basename: string, hasSibling: (query: string) => boolean) => {
 			path = path.slice(1);
-			if (folderExcludes(path, basename, hasSibling)) { return false; }
-			if (!pathIncludedInQuery(queryProps, path)) { return false; }
+			if (evalFolderExcludes(path, basename, hasSibling)) { return false; }
+			if (!pathIncludedInQuery(queryProps, path, extUri)) { return false; }
 			return true;
 		};
 
-		const proccessFile = (file: FileSystemFileHandle, prior: string): FileNode => {
+		const processFile = (file: FileSystemFileHandle, prior: string): FileNode => {
 
 			const resolved: FileNode = {
 				type: 'file',
@@ -200,8 +215,15 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 			return resolved;
 		};
 
+		const isFileSystemDirectoryHandle = (handle: IWorkerFileSystemHandle): handle is FileSystemDirectoryHandle => {
+			return handle.kind === 'directory';
+		};
 
-		const processDirectory = async (directory: FileSystemDirectoryHandle, prior: string, ignoreFile?: IgnoreFile): Promise<DirNode> => {
+		const isFileSystemFileHandle = (handle: IWorkerFileSystemHandle): handle is FileSystemFileHandle => {
+			return handle.kind === 'file';
+		};
+
+		const processDirectory = async (directory: IWorkerFileSystemDirectoryHandle, prior: string, ignoreFile?: IgnoreFile): Promise<DirNode> => {
 
 			if (!folderQuery.disregardIgnoreFiles) {
 				const ignoreFiles = await Promise.all([
@@ -221,7 +243,7 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 				const files: FileNode[] = [];
 				const dirs: Promise<DirNode>[] = [];
 
-				const entries: [string, FileSystemHandle][] = [];
+				const entries: [string, IWorkerFileSystemHandle][] = [];
 				const sibilings = new Set<string>();
 
 				for await (const entry of directory.entries()) {
@@ -242,10 +264,10 @@ export class LocalFileSearchSimpleWorker implements ILocalFileSearchSimpleWorker
 
 					const hasSibling = (query: string) => sibilings.has(query);
 
-					if (handle.kind === 'directory' && !isFolderExcluded(path, basename, hasSibling)) {
+					if (isFileSystemDirectoryHandle(handle) && !isFolderExcluded(path, basename, hasSibling)) {
 						dirs.push(processDirectory(handle, path + '/', ignoreFile));
-					} else if (handle.kind === 'file' && isFileIncluded(path, basename, hasSibling)) {
-						files.push(proccessFile(handle, path));
+					} else if (isFileSystemFileHandle(handle) && isFileIncluded(path, basename, hasSibling)) {
+						files.push(processFile(handle, path));
 					}
 				}
 				c([...await Promise.all(dirs), ...files]);
@@ -289,31 +311,49 @@ function createSearchRegExp(options: IPatternInfo): RegExp {
 	});
 }
 
+function reviveFolderQuery(folderQuery: IFolderQuery<UriComponents>): IFolderQuery<URI> {
+	// @todo: andrea - try to see why we can't just call 'revive' here
+	return revive({
+		...revive(folderQuery),
+		excludePattern: folderQuery.excludePattern?.map(ep => ({ folder: URI.revive(ep.folder), pattern: ep.pattern })),
+		folder: URI.revive(folderQuery.folder),
+	});
+}
 
-function pathExcludedInQuery(queryProps: ICommonQueryProps<UriComponents>, fsPath: string): boolean {
+function reviveQueryProps(queryProps: ICommonQueryProps<UriComponents>): ICommonQueryProps<URI> {
+	return {
+		...queryProps,
+		extraFileResources: queryProps.extraFileResources?.map(r => URI.revive(r)),
+		folderQueries: queryProps.folderQueries.map(fq => reviveFolderQuery(fq)),
+	};
+}
+
+
+function pathExcludedInQuery(queryProps: ICommonQueryProps<URI>, fsPath: string): boolean {
 	if (queryProps.excludePattern && glob.match(queryProps.excludePattern, fsPath)) {
 		return true;
 	}
-
 	return false;
 }
 
-function pathIncludedInQuery(queryProps: ICommonQueryProps<UriComponents>, fsPath: string): boolean {
-	if (queryProps.excludePattern && glob.match(queryProps.excludePattern, fsPath)) {
+function pathIncludedInQuery(queryProps: ICommonQueryProps<URI>, path: string, extUri: ExtUri): boolean {
+	if (queryProps.excludePattern && glob.match(queryProps.excludePattern, path)) {
 		return false;
 	}
 
 	if (queryProps.includePattern || queryProps.usingSearchPaths) {
-		if (queryProps.includePattern && glob.match(queryProps.includePattern, fsPath)) {
+		if (queryProps.includePattern && glob.match(queryProps.includePattern, path)) {
 			return true;
 		}
 
 		// If searchPaths are being used, the extra file must be in a subfolder and match the pattern, if present
 		if (queryProps.usingSearchPaths) {
+
 			return !!queryProps.folderQueries && queryProps.folderQueries.some(fq => {
-				const searchPath = fq.folder.path;
-				if (extpath.isEqualOrParent(fsPath, searchPath)) {
-					const relPath = paths.relative(searchPath, fsPath);
+				const searchPath = fq.folder;
+				const uri = URI.file(path);
+				if (extUri.isEqualOrParent(uri, searchPath)) {
+					const relPath = paths.relative(searchPath.path, uri.path);
 					return !fq.includePattern || !!glob.match(fq.includePattern, relPath);
 				} else {
 					return false;

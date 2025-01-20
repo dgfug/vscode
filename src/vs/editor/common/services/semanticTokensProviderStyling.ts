@@ -3,20 +3,25 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { SemanticTokensLegend, TokenMetadata, FontStyle, MetadataConsts, SemanticTokens } from 'vs/editor/common/languages';
-import { IThemeService } from 'vs/platform/theme/common/themeService';
-import { ILogService, LogLevel } from 'vs/platform/log/common/log';
-import { SparseMultilineTokens } from 'vs/editor/common/model/tokens/sparseMultilineTokens';
-import { ILanguageService } from 'vs/editor/common/services/language';
+import { SemanticTokensLegend, SemanticTokens } from '../languages.js';
+import { FontStyle, MetadataConsts, TokenMetadata } from '../encodedTokenAttributes.js';
+import { IThemeService } from '../../../platform/theme/common/themeService.js';
+import { ILogService, LogLevel } from '../../../platform/log/common/log.js';
+import { SparseMultilineTokens } from '../tokens/sparseMultilineTokens.js';
+import { ILanguageService } from '../languages/language.js';
 
-export const enum SemanticTokensProviderStylingConstants {
+const enum SemanticTokensProviderStylingConstants {
 	NO_STYLING = 0b01111111111111111111111111111111
 }
+
+const ENABLE_TRACE = false;
 
 export class SemanticTokensProviderStyling {
 
 	private readonly _hashTable: HashTable;
-	private _hasWarnedOverlappingTokens: boolean;
+	private _hasWarnedOverlappingTokens = false;
+	private _hasWarnedInvalidLengthTokens = false;
+	private _hasWarnedInvalidEditStart = false;
 
 	constructor(
 		private readonly _legend: SemanticTokensLegend,
@@ -25,7 +30,6 @@ export class SemanticTokensProviderStyling {
 		@ILogService private readonly _logService: ILogService
 	) {
 		this._hashTable = new HashTable();
-		this._hasWarnedOverlappingTokens = false;
 	}
 
 	public getMetadata(tokenTypeIndex: number, tokenModifierSet: number, languageId: string): number {
@@ -34,7 +38,7 @@ export class SemanticTokensProviderStyling {
 		let metadata: number;
 		if (entry) {
 			metadata = entry.metadata;
-			if (this._logService.getLevel() === LogLevel.Trace) {
+			if (ENABLE_TRACE && this._logService.getLevel() === LogLevel.Trace) {
 				this._logService.trace(`SemanticTokensProviderStyling [CACHED] ${tokenTypeIndex} / ${tokenModifierSet}: foreground ${TokenMetadata.getForeground(metadata)}, fontStyle ${TokenMetadata.getFontStyle(metadata).toString(2)}`);
 			}
 		} else {
@@ -48,7 +52,7 @@ export class SemanticTokensProviderStyling {
 					}
 					modifierSet = modifierSet >> 1;
 				}
-				if (modifierSet > 0 && this._logService.getLevel() === LogLevel.Trace) {
+				if (ENABLE_TRACE && modifierSet > 0 && this._logService.getLevel() === LogLevel.Trace) {
 					this._logService.trace(`SemanticTokensProviderStyling: unknown token modifier index: ${tokenModifierSet.toString(2)} for legend: ${JSON.stringify(this._legend.tokenModifiers)}`);
 					tokenModifiers.push('not-in-legend');
 				}
@@ -84,7 +88,7 @@ export class SemanticTokensProviderStyling {
 					}
 				}
 			} else {
-				if (this._logService.getLevel() === LogLevel.Trace) {
+				if (ENABLE_TRACE && this._logService.getLevel() === LogLevel.Trace) {
 					this._logService.trace(`SemanticTokensProviderStyling: unknown token type index: ${tokenTypeIndex} for legend: ${JSON.stringify(this._legend.tokenTypes)}`);
 				}
 				metadata = SemanticTokensProviderStylingConstants.NO_STYLING;
@@ -92,7 +96,7 @@ export class SemanticTokensProviderStyling {
 			}
 			this._hashTable.add(tokenTypeIndex, tokenModifierSet, encodedLanguageId, metadata);
 
-			if (this._logService.getLevel() === LogLevel.Trace) {
+			if (ENABLE_TRACE && this._logService.getLevel() === LogLevel.Trace) {
 				this._logService.trace(`SemanticTokensProviderStyling ${tokenTypeIndex} (${tokenType}) / ${tokenModifierSet} (${tokenModifiers.join(' ')}): foreground ${TokenMetadata.getForeground(metadata)}, fontStyle ${TokenMetadata.getFontStyle(metadata).toString(2)}`);
 			}
 		}
@@ -103,7 +107,21 @@ export class SemanticTokensProviderStyling {
 	public warnOverlappingSemanticTokens(lineNumber: number, startColumn: number): void {
 		if (!this._hasWarnedOverlappingTokens) {
 			this._hasWarnedOverlappingTokens = true;
-			console.warn(`Overlapping semantic tokens detected at lineNumber ${lineNumber}, column ${startColumn}`);
+			this._logService.warn(`Overlapping semantic tokens detected at lineNumber ${lineNumber}, column ${startColumn}`);
+		}
+	}
+
+	public warnInvalidLengthSemanticTokens(lineNumber: number, startColumn: number): void {
+		if (!this._hasWarnedInvalidLengthTokens) {
+			this._hasWarnedInvalidLengthTokens = true;
+			this._logService.warn(`Semantic token with invalid length detected at lineNumber ${lineNumber}, column ${startColumn}`);
+		}
+	}
+
+	public warnInvalidEditStart(previousResultId: string | undefined, resultId: string | undefined, editIndex: number, editStart: number, maxExpectedStart: number): void {
+		if (!this._hasWarnedInvalidEditStart) {
+			this._hasWarnedInvalidEditStart = true;
+			this._logService.warn(`Invalid semantic tokens edit detected (previousResultId: ${previousResultId}, resultId: ${resultId}) at edit #${editIndex}: The provided start offset ${editStart} is outside the previous data (length ${maxExpectedStart}).`);
 		}
 	}
 
@@ -160,44 +178,42 @@ export function toMultilineTokens2(tokens: SemanticTokens, styling: SemanticToke
 		let destOffset = 0;
 		let areaLine = 0;
 		let prevLineNumber = 0;
-		let prevStartCharacter = 0;
 		let prevEndCharacter = 0;
 		while (tokenIndex < tokenEndIndex) {
 			const srcOffset = 5 * tokenIndex;
 			const deltaLine = srcData[srcOffset];
 			const deltaCharacter = srcData[srcOffset + 1];
-			// Casting both `lineNumber` and `startCharacter` here to uint32 using `|0`
-			// to do checks below with the actual value that will be inserted in the Uint32Array result
+			// Casting both `lineNumber`, `startCharacter` and `endCharacter` here to uint32 using `|0`
+			// to validate below with the actual values that will be inserted in the Uint32Array result
 			const lineNumber = (lastLineNumber + deltaLine) | 0;
 			const startCharacter = (deltaLine === 0 ? (lastStartCharacter + deltaCharacter) | 0 : deltaCharacter);
 			const length = srcData[srcOffset + 2];
+			const endCharacter = (startCharacter + length) | 0;
 			const tokenTypeIndex = srcData[srcOffset + 3];
 			const tokenModifierSet = srcData[srcOffset + 4];
-			const metadata = styling.getMetadata(tokenTypeIndex, tokenModifierSet, languageId);
 
-			if (metadata !== SemanticTokensProviderStylingConstants.NO_STYLING) {
-				if (areaLine === 0) {
-					areaLine = lineNumber;
-				}
-				if (prevLineNumber === lineNumber && prevEndCharacter > startCharacter) {
-					styling.warnOverlappingSemanticTokens(lineNumber, startCharacter + 1);
-					if (prevStartCharacter < startCharacter) {
-						// the previous token survives after the overlapping one
-						destData[destOffset - 4 + 2] = startCharacter;
-					} else {
-						// the previous token is entirely covered by the overlapping one
-						destOffset -= 4;
+			if (endCharacter <= startCharacter) {
+				// this token is invalid (most likely a negative length casted to uint32)
+				styling.warnInvalidLengthSemanticTokens(lineNumber, startCharacter + 1);
+			} else if (prevLineNumber === lineNumber && prevEndCharacter > startCharacter) {
+				// this token overlaps with the previous token
+				styling.warnOverlappingSemanticTokens(lineNumber, startCharacter + 1);
+			} else {
+				const metadata = styling.getMetadata(tokenTypeIndex, tokenModifierSet, languageId);
+
+				if (metadata !== SemanticTokensProviderStylingConstants.NO_STYLING) {
+					if (areaLine === 0) {
+						areaLine = lineNumber;
 					}
-				}
-				destData[destOffset] = lineNumber - areaLine;
-				destData[destOffset + 1] = startCharacter;
-				destData[destOffset + 2] = startCharacter + length;
-				destData[destOffset + 3] = metadata;
-				destOffset += 4;
+					destData[destOffset] = lineNumber - areaLine;
+					destData[destOffset + 1] = startCharacter;
+					destData[destOffset + 2] = endCharacter;
+					destData[destOffset + 3] = metadata;
+					destOffset += 4;
 
-				prevLineNumber = lineNumber;
-				prevStartCharacter = startCharacter;
-				prevEndCharacter = startCharacter + length;
+					prevLineNumber = lineNumber;
+					prevEndCharacter = endCharacter;
+				}
 			}
 
 			lastLineNumber = lineNumber;

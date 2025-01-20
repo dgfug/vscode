@@ -3,14 +3,17 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { Emitter } from 'vs/base/common/event';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
-import { ExtHostWebview, ExtHostWebviews, toExtensionData } from 'vs/workbench/api/common/extHostWebview';
+import { CancellationToken } from '../../../base/common/cancellation.js';
+import { Emitter } from '../../../base/common/event.js';
+import { Disposable } from '../../../base/common/lifecycle.js';
+import { IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
+import { ExtHostWebview, ExtHostWebviews, toExtensionData, shouldSerializeBuffersForPostMessage } from './extHostWebview.js';
+import { ViewBadge } from './extHostTypeConverters.js';
 import type * as vscode from 'vscode';
-import * as extHostProtocol from './extHost.protocol';
-import * as extHostTypes from './extHostTypes';
+import * as extHostProtocol from './extHost.protocol.js';
+import * as extHostTypes from './extHostTypes.js';
+
+/* eslint-disable local/code-no-native-private */
 
 class ExtHostWebviewView extends Disposable implements vscode.WebviewView {
 
@@ -24,6 +27,7 @@ class ExtHostWebviewView extends Disposable implements vscode.WebviewView {
 	#isVisible: boolean;
 	#title: string | undefined;
 	#description: string | undefined;
+	#badge: vscode.ViewBadge | undefined;
 
 	constructor(
 		handle: extHostProtocol.WebviewHandle,
@@ -103,6 +107,23 @@ class ExtHostWebviewView extends Disposable implements vscode.WebviewView {
 		this.#onDidChangeVisibility.fire();
 	}
 
+	public get badge(): vscode.ViewBadge | undefined {
+		this.assertNotDisposed();
+		return this.#badge;
+	}
+
+	public set badge(badge: vscode.ViewBadge | undefined) {
+		this.assertNotDisposed();
+
+		if (badge?.value === this.#badge?.value &&
+			badge?.tooltip === this.#badge?.tooltip) {
+			return;
+		}
+
+		this.#badge = ViewBadge.from(badge);
+		this.#proxy.$setWebviewViewBadge(this.#handle, badge);
+	}
+
 	public show(preserveFocus?: boolean): void {
 		this.assertNotDisposed();
 		this.#proxy.$show(this.#handle, !!preserveFocus);
@@ -138,7 +159,7 @@ export class ExtHostWebviewViews implements extHostProtocol.ExtHostWebviewViewsS
 		viewType: string,
 		provider: vscode.WebviewViewProvider,
 		webviewOptions?: {
-			retainContextWhenHidden?: boolean
+			retainContextWhenHidden?: boolean;
 		},
 	): vscode.Disposable {
 		if (this._viewProviders.has(viewType)) {
@@ -148,7 +169,7 @@ export class ExtHostWebviewViews implements extHostProtocol.ExtHostWebviewViewsS
 		this._viewProviders.set(viewType, { provider, extension });
 		this._proxy.$registerWebviewViewProvider(toExtensionData(extension), viewType, {
 			retainContextWhenHidden: webviewOptions?.retainContextWhenHidden,
-			serializeBuffersForPostMessage: false,
+			serializeBuffersForPostMessage: shouldSerializeBuffersForPostMessage(extension),
 		});
 
 		return new extHostTypes.Disposable(() => {

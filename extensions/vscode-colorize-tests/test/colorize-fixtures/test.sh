@@ -10,11 +10,16 @@ fi
 DEVELOPER=$(xcode-select -print-path)
 LIPO=$(xcrun -sdk iphoneos -find lipo)
 
+cat <<-EOF > /path/file
+	# A heredoc with a variable $DEVELOPER
+	some more file
+EOF
+
 function code() {
 	cd $ROOT
 
 	# Node modules
-	test -d node_modules || ./scripts/npm.sh install
+	test -d node_modules || npm i
 
 	# Configuration
 	export NODE_ENV=development

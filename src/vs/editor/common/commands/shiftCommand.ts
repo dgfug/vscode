@@ -3,15 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CharCode } from 'vs/base/common/charCode';
-import * as strings from 'vs/base/common/strings';
-import { CursorColumns } from 'vs/editor/common/controller/cursorCommon';
-import { Range } from 'vs/editor/common/core/range';
-import { Selection, SelectionDirection } from 'vs/editor/common/core/selection';
-import { ICommand, ICursorStateComputerData, IEditOperationBuilder } from 'vs/editor/common/editorCommon';
-import { ITextModel } from 'vs/editor/common/model';
-import { LanguageConfigurationRegistry } from 'vs/editor/common/languages/languageConfigurationRegistry';
-import { EditorAutoIndentStrategy } from 'vs/editor/common/config/editorOptions';
+import { CharCode } from '../../../base/common/charCode.js';
+import * as strings from '../../../base/common/strings.js';
+import { CursorColumns } from '../core/cursorColumns.js';
+import { Range } from '../core/range.js';
+import { Selection, SelectionDirection } from '../core/selection.js';
+import { ICommand, ICursorStateComputerData, IEditOperationBuilder } from '../editorCommon.js';
+import { ITextModel } from '../model.js';
+import { EditorAutoIndentStrategy } from '../config/editorOptions.js';
+import { getEnterAction } from '../languages/enterAction.js';
+import { ILanguageConfigurationService } from '../languages/languageConfigurationRegistry.js';
 
 export interface IShiftCommandOpts {
 	isUnshift: boolean;
@@ -22,8 +23,8 @@ export interface IShiftCommandOpts {
 	autoIndent: EditorAutoIndentStrategy;
 }
 
-const repeatCache: { [str: string]: string[]; } = Object.create(null);
-export function cachedStringRepeat(str: string, count: number): string {
+const repeatCache: { [str: string]: string[] } = Object.create(null);
+function cachedStringRepeat(str: string, count: number): string {
 	if (count <= 0) {
 		return '';
 	}
@@ -79,7 +80,11 @@ export class ShiftCommand implements ICommand {
 	private _useLastEditRangeForCursorEndPosition: boolean;
 	private _selectionStartColumnStaysPut: boolean;
 
-	constructor(range: Selection, opts: IShiftCommandOpts) {
+	constructor(
+		range: Selection,
+		opts: IShiftCommandOpts,
+		@ILanguageConfigurationService private readonly _languageConfigurationService: ILanguageConfigurationService
+	) {
 		this._opts = opts;
 		this._selection = range;
 		this._selectionId = null;
@@ -141,8 +146,8 @@ export class ShiftCommand implements ICommand {
 					if (contentStartVisibleColumn % indentSize !== 0) {
 						// The current line is "miss-aligned", so let's see if this is expected...
 						// This can only happen when it has trailing commas in the indent
-						if (model.isCheapToTokenize(lineNumber - 1)) {
-							const enterAction = LanguageConfigurationRegistry.getEnterAction(this._opts.autoIndent, model, new Range(lineNumber - 1, model.getLineMaxColumn(lineNumber - 1), lineNumber - 1, model.getLineMaxColumn(lineNumber - 1)));
+						if (model.tokenization.isCheapToTokenize(lineNumber - 1)) {
+							const enterAction = getEnterAction(this._opts.autoIndent, model, new Range(lineNumber - 1, model.getLineMaxColumn(lineNumber - 1), lineNumber - 1, model.getLineMaxColumn(lineNumber - 1)), this._languageConfigurationService);
 							if (enterAction) {
 								extraSpaces = previousLineExtraSpaces;
 								if (enterAction.appendText) {

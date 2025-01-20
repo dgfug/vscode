@@ -3,13 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { StandardWheelEvent } from 'vs/base/browser/mouseEvent';
-import { AbstractScrollbar, ISimplifiedMouseEvent, ScrollbarHost } from 'vs/base/browser/ui/scrollbar/abstractScrollbar';
-import { ScrollableElementResolvedOptions } from 'vs/base/browser/ui/scrollbar/scrollableElementOptions';
-import { ARROW_IMG_SIZE } from 'vs/base/browser/ui/scrollbar/scrollbarArrow';
-import { ScrollbarState } from 'vs/base/browser/ui/scrollbar/scrollbarState';
-import { Codicon } from 'vs/base/common/codicons';
-import { INewScrollPosition, Scrollable, ScrollbarVisibility, ScrollEvent } from 'vs/base/common/scrollable';
+import { StandardWheelEvent } from '../../mouseEvent.js';
+import { AbstractScrollbar, ISimplifiedPointerEvent, ScrollbarHost } from './abstractScrollbar.js';
+import { ScrollableElementResolvedOptions } from './scrollableElementOptions.js';
+import { ARROW_IMG_SIZE } from './scrollbarArrow.js';
+import { ScrollbarState } from './scrollbarState.js';
+import { Codicon } from '../../../common/codicons.js';
+import { INewScrollPosition, Scrollable, ScrollbarVisibility, ScrollEvent } from '../../../common/scrollable.js';
 
 
 
@@ -87,16 +87,16 @@ export class VerticalScrollbar extends AbstractScrollbar {
 		return this._shouldRender;
 	}
 
-	protected _mouseDownRelativePosition(offsetX: number, offsetY: number): number {
+	protected _pointerDownRelativePosition(offsetX: number, offsetY: number): number {
 		return offsetY;
 	}
 
-	protected _sliderMousePosition(e: ISimplifiedMouseEvent): number {
-		return e.posy;
+	protected _sliderPointerPosition(e: ISimplifiedPointerEvent): number {
+		return e.pageY;
 	}
 
-	protected _sliderOrthogonalMousePosition(e: ISimplifiedMouseEvent): number {
-		return e.posx;
+	protected _sliderOrthogonalPointerPosition(e: ISimplifiedPointerEvent): number {
+		return e.pageX;
 	}
 
 	protected _updateScrollbarSize(size: number): void {

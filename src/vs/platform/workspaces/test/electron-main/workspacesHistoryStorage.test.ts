@@ -3,12 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
+import assert from 'assert';
 import { tmpdir } from 'os';
-import { join } from 'vs/base/common/path';
-import { URI } from 'vs/base/common/uri';
-import { NullLogService } from 'vs/platform/log/common/log';
-import { IRecentFolder, IRecentlyOpened, IRecentWorkspace, isRecentFolder, IWorkspaceIdentifier, restoreRecentlyOpened, toStoreData } from 'vs/platform/workspaces/common/workspaces';
+import { join } from '../../../../base/common/path.js';
+import { URI } from '../../../../base/common/uri.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { NullLogService } from '../../../log/common/log.js';
+import { IWorkspaceIdentifier } from '../../../workspace/common/workspace.js';
+import { IRecentFolder, IRecentlyOpened, IRecentWorkspace, isRecentFolder, restoreRecentlyOpened, toStoreData } from '../../common/workspaces.js';
 
 suite('History Storage', () => {
 
@@ -40,8 +42,8 @@ suite('History Storage', () => {
 		}
 		assert.strictEqual(actual.workspaces.length, expected.workspaces.length, message);
 		for (let i = 0; i < actual.workspaces.length; i++) {
-			let expectedRecent = expected.workspaces[i];
-			let actualRecent = actual.workspaces[i];
+			const expectedRecent = expected.workspaces[i];
+			const actualRecent = actual.workspaces[i];
 			if (isRecentFolder(actualRecent)) {
 				assertEqualURI(actualRecent.folderUri, (<IRecentFolder>expectedRecent).folderUri, message);
 			} else {
@@ -106,39 +108,6 @@ suite('History Storage', () => {
 		assertRestoring(ro, 'authority');
 	});
 
-	test('open 1_33', () => {
-		const v1_33 = `{
-			"workspaces3": [
-				{
-					"id": "53b714b46ef1a2d4346568b4f591028c",
-					"configURIPath": "file:///home/user/workspaces/testing/custom.code-workspace"
-				},
-				"file:///home/user/workspaces/testing/folding"
-			],
-			"files2": [
-				"file:///home/user/.config/code-oss-dev/storage.json"
-			],
-			"workspaceLabels": [
-				null,
-				"abc"
-			],
-			"fileLabels": [
-				"def"
-			]
-		}`;
-
-		let windowsState = restoreRecentlyOpened(JSON.parse(v1_33), new NullLogService());
-		let expected: IRecentlyOpened = {
-			files: [{ label: 'def', fileUri: URI.parse('file:///home/user/.config/code-oss-dev/storage.json') }],
-			workspaces: [
-				{ workspace: { id: '53b714b46ef1a2d4346568b4f591028c', configPath: URI.parse('file:///home/user/workspaces/testing/custom.code-workspace') } },
-				{ label: 'abc', folderUri: URI.parse('file:///home/user/workspaces/testing/folding') }
-			]
-		};
-
-		assertEqualRecentlyOpened(windowsState, expected, 'v1_33');
-	});
-
 	test('open 1_55', () => {
 		const v1_55 = `{
 			"entries": [
@@ -163,8 +132,8 @@ suite('History Storage', () => {
 			]
 		}`;
 
-		let windowsState = restoreRecentlyOpened(JSON.parse(v1_55), new NullLogService());
-		let expected: IRecentlyOpened = {
+		const windowsState = restoreRecentlyOpened(JSON.parse(v1_55), new NullLogService());
+		const expected: IRecentlyOpened = {
 			files: [{ label: 'def', fileUri: URI.parse('file:///home/user/.config/code-oss-dev/storage.json') }],
 			workspaces: [
 				{ folderUri: URI.parse('foo://bar/23/43'), remoteAuthority: 'test+test' },
@@ -175,4 +144,24 @@ suite('History Storage', () => {
 
 		assertEqualRecentlyOpened(windowsState, expected, 'v1_33');
 	});
+
+	test('toStoreData drops label if it matches path', () => {
+		const actual = toStoreData({
+			workspaces: [],
+			files: [{
+				fileUri: URI.parse('file:///foo/bar/test.txt'),
+				label: '/foo/bar/test.txt',
+				remoteAuthority: undefined
+			}]
+		});
+		assert.deepStrictEqual(actual, {
+			entries: [{
+				fileUri: 'file:///foo/bar/test.txt',
+				label: undefined,
+				remoteAuthority: undefined
+			}]
+		});
+	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
 });

@@ -3,11 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as extHostProtocol from 'vs/workbench/api/common/extHost.protocol';
-import { NotebookCellTextModel } from 'vs/workbench/contrib/notebook/common/model/notebookCellTextModel';
-import * as notebookCommon from 'vs/workbench/contrib/notebook/common/notebookCommon';
-import { CellExecutionUpdateType } from 'vs/workbench/contrib/notebook/common/notebookExecutionService';
-import { ICellExecuteUpdate, ICellExecutionComplete } from 'vs/workbench/contrib/notebook/common/notebookExecutionStateService';
+import * as extHostProtocol from '../common/extHost.protocol.js';
+import * as notebookCommon from '../../contrib/notebook/common/notebookCommon.js';
+import { CellExecutionUpdateType } from '../../contrib/notebook/common/notebookExecutionService.js';
+import { ICellExecuteUpdate, ICellExecutionComplete } from '../../contrib/notebook/common/notebookExecutionStateService.js';
 
 export namespace NotebookDto {
 
@@ -79,7 +78,7 @@ export namespace NotebookDto {
 		};
 	}
 
-	export function toNotebookCellDto(cell: NotebookCellTextModel): extHostProtocol.NotebookCellDto {
+	export function toNotebookCellDto(cell: notebookCommon.ICell): extHostProtocol.NotebookCellDto {
 		return {
 			handle: cell.handle,
 			uri: cell.uri,

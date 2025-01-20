@@ -3,10 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { ColorZone, OverviewRulerZone, OverviewZoneManager } from 'vs/editor/common/view/overviewZoneManager';
+import assert from 'assert';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { ColorZone, OverviewRulerZone, OverviewZoneManager } from '../../../common/viewModel/overviewZoneManager.js';
 
 suite('Editor View - OverviewZoneManager', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
 
 	test('pixel ratio 1, dom height 600', () => {
 		const LINE_COUNT = 50;
@@ -19,10 +22,10 @@ suite('Editor View - OverviewZoneManager', () => {
 		manager.setPixelRatio(1);
 
 		manager.setZones([
-			new OverviewRulerZone(1, 1, '1'),
-			new OverviewRulerZone(10, 10, '2'),
-			new OverviewRulerZone(30, 31, '3'),
-			new OverviewRulerZone(50, 50, '4'),
+			new OverviewRulerZone(1, 1, 0, '1'),
+			new OverviewRulerZone(10, 10, 0, '2'),
+			new OverviewRulerZone(30, 31, 0, '3'),
+			new OverviewRulerZone(50, 50, 0, '4'),
 		]);
 
 		// one line = 12, but cap is at 6
@@ -45,10 +48,10 @@ suite('Editor View - OverviewZoneManager', () => {
 		manager.setPixelRatio(1);
 
 		manager.setZones([
-			new OverviewRulerZone(1, 1, '1'),
-			new OverviewRulerZone(10, 10, '2'),
-			new OverviewRulerZone(30, 31, '3'),
-			new OverviewRulerZone(50, 50, '4'),
+			new OverviewRulerZone(1, 1, 0, '1'),
+			new OverviewRulerZone(10, 10, 0, '2'),
+			new OverviewRulerZone(30, 31, 0, '3'),
+			new OverviewRulerZone(50, 50, 0, '4'),
 		]);
 
 		// one line = 6, cap is at 6
@@ -71,10 +74,10 @@ suite('Editor View - OverviewZoneManager', () => {
 		manager.setPixelRatio(2);
 
 		manager.setZones([
-			new OverviewRulerZone(1, 1, '1'),
-			new OverviewRulerZone(10, 10, '2'),
-			new OverviewRulerZone(30, 31, '3'),
-			new OverviewRulerZone(50, 50, '4'),
+			new OverviewRulerZone(1, 1, 0, '1'),
+			new OverviewRulerZone(10, 10, 0, '2'),
+			new OverviewRulerZone(30, 31, 0, '3'),
+			new OverviewRulerZone(50, 50, 0, '4'),
 		]);
 
 		// one line = 6, cap is at 12
